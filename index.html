@@ -696,11 +696,39 @@ if (packKey === "single") {
   const saveForm = () => {
     if (!form.name.trim()) return;
     const cleanSizes = form.sizes
-      .map((s) => ({
-        key: s.key, vitola: s.vitola.trim(), dims: s.dims.trim(), msrp: s.msrp.trim(),
-        keystoneSingle: s.keystoneSingle.trim(), keystoneBox10: s.keystoneBox10.trim(),
-        keystoneBox20: s.keystoneBox20.trim(), keystoneBundle20: s.keystoneBundle20.trim(),
-      }))
+    .map((s) => {
+  const msrp = s.msrp.trim();
+  const keystoneSingle = s.keystoneSingle.trim();
+  const keystoneBox10 = s.keystoneBox10.trim();
+  const keystoneBox20 = s.keystoneBox20.trim();
+  const keystoneBundle20 = s.keystoneBundle20.trim();
+
+  return {
+    key: s.key,
+    vitola: s.vitola.trim(),
+    dims: s.dims.trim(),
+    msrp,
+    keystoneSingle,
+    keystoneBox10,
+    keystoneBox20,
+    keystoneBundle20,
+
+    pricing: {
+      msrp: parseMoney(msrp),
+      boxSingle: getSinglePrice(
+        { keystoneSingle },
+        "box"
+      ),
+      bundleSingle: getSinglePrice(
+        { keystoneSingle },
+        "bundle"
+      ),
+      box10: parseMoney(keystoneBox10),
+      box20: parseMoney(keystoneBox20),
+      bundle20: parseMoney(keystoneBundle20),
+    },
+  };
+})
       .filter((s) => s.vitola || s.dims || s.msrp || s.keystoneSingle || s.keystoneBox10 || s.keystoneBox20 || s.keystoneBundle20);
     const record = {
       ...form,
