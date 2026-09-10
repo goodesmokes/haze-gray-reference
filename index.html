@@ -1118,18 +1118,88 @@ if (packKey === "single") {
                             <div><span style={{ color: "#8A93A0" }}>20ct Box: </span>{s.keystoneBox20 || "—"}</div>
                             <div><span style={{ color: "#8A93A0" }}>20ct Bundle: </span>{s.keystoneBundle20 || "—"}</div>
                           </div>
-                          {(() => {
-                            const m = computeMargin(s);
-                            if (!m) return null;
-                            return (
-                              <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px dashed #3B2A1E" }}>
-                                <div style={{ fontFamily: "'Oswald', sans-serif", fontSize: 10, letterSpacing: 1.5, color: "#8A93A0", textTransform: "uppercase", marginBottom: 3 }}>Retailer Margin</div>
-                                <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, color: "#E7C79A" }}>
-                                  ${m.marginDollar.toFixed(2)}/stick · {m.marginPct.toFixed(0)}%
-                                </div>
-                              </div>
-                            );
-                          })()}
+                         {(() => {
+  const margins = computePackageMargins(s);
+
+  if (!margins) return null;
+
+  return (
+    <div
+      style={{
+        marginTop: 10,
+        paddingTop: 10,
+        borderTop: "1px dashed #3B2A1E"
+      }}
+    >
+      <div
+        style={{
+          fontFamily: "'Oswald', sans-serif",
+          fontSize: 10,
+          letterSpacing: 1.5,
+          color: "#8A93A0",
+          textTransform: "uppercase",
+          marginBottom: 7
+        }}
+      >
+        Retailer Profit
+      </div>
+
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: 8
+        }}
+      >
+        {margins.map((m) => (
+          <div
+            key={m.key}
+            style={{
+              borderLeft: "2px solid #B8894C",
+              paddingLeft: 8
+            }}
+          >
+            <div
+              style={{
+                fontFamily: "'Oswald', sans-serif",
+                fontSize: 11,
+                letterSpacing: 1,
+                color: "#C9CFD6",
+                textTransform: "uppercase"
+              }}
+            >
+              {m.label}
+            </div>
+
+            <div
+              style={{
+                fontFamily: "'JetBrains Mono', monospace",
+                fontSize: 12.5,
+                color: "#E7C79A",
+                marginTop: 2
+              }}
+            >
+              ${m.grossProfit.toFixed(2)} profit ·{" "}
+              {m.marginPct.toFixed(1)}% margin
+            </div>
+
+            <div
+              style={{
+                fontFamily: "'JetBrains Mono', monospace",
+                fontSize: 11.5,
+                color: "#8A93A0",
+                marginTop: 2
+              }}
+            >
+              Cost ${m.cost.toFixed(2)} · Retail $
+              {m.retailValue.toFixed(2)}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+})()}
                         </div>
                       </div>
                     </div>
