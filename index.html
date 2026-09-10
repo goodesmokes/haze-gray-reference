@@ -895,7 +895,10 @@ if (packKey === "single") {
                           {s.vitola}{s.dims ? ` (${s.dims})` : ""}
                         </div>
                         {PACK_OPTIONS.map((pack) => {
-                          const price = parseMoney(s[pack.field]);
+                          const price =
+  pack.key === "single"
+    ? getSinglePrice(s, "box")
+    : getNumericPrice(s, pack.key);
                           if (price == null) return null;
                           return (
                             <button
