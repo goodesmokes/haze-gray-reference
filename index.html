@@ -535,7 +535,7 @@ if (packKey === "single") {
   const toggleCompareId = (id) => {
     setCompareIds((prev) => {
       if (prev.includes(id)) return prev.filter((x) => x !== id);
-      if (prev.length >= 2) return [prev[1], id];
+      if (prev.length >= 3) return [...prev.slice(1), id];
       return [...prev, id];
     });
   };
@@ -996,72 +996,274 @@ if (packKey === "single") {
             </div>
           )}
         </div>
-      ) : showCompare && compareIds.length === 2 ? (
-        // ---------- COMPARE VIEW ----------
-        <div style={{ maxWidth: 1000, margin: "0 auto", padding: "24px" }}>
-          <button className="hg-btn" onClick={() => setShowCompare(false)} style={{
-            display: "flex", alignItems: "center", gap: 6, background: "none", border: "none",
-            color: "#B8894C", fontFamily: "'Oswald', sans-serif", fontSize: 13, letterSpacing: 1,
-            textTransform: "uppercase", padding: "6px 0", marginBottom: 18,
-          }}>
-            <ArrowLeft size={16} /> Back to list
-          </button>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 16 }}>
+      ) : showCompare && compareIds.length >= 2 ? (
+  // ---------- COMPARE VIEW ----------
+  <div style={{ maxWidth: 1200, margin: "0 auto", padding: "24px" }}>
+
+    <button
+      className="hg-btn"
+      onClick={() => setShowCompare(false)}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 6,
+        background: "none",
+        border: "none",
+        color: "#B8894C",
+        fontFamily: "'Oswald', sans-serif",
+        fontSize: 13,
+        letterSpacing: 1,
+        textTransform: "uppercase",
+        padding: "6px 0",
+        marginBottom: 18
+      }}
+    >
+      <ArrowLeft size={16} /> Back to list
+    </button>
+
+    <div
+      style={{
+        fontFamily: "'Bebas Neue', sans-serif",
+        fontSize: 34,
+        letterSpacing: 1,
+        marginBottom: 4
+      }}
+    >
+      Sales Comparison
+    </div>
+
+    <div
+      style={{
+        fontFamily: "'Oswald', sans-serif",
+        fontSize: 12.5,
+        color: "#8A93A0",
+        letterSpacing: 0.8,
+        marginBottom: 18
+      }}
+    >
+      Compare product profile, pricing, and retailer economics side by side.
+    </div>
+
+    <div
+      className="hg-scroll"
+      style={{
+        overflowX: "auto",
+        border: "1px solid #3B2A1E",
+        borderRadius: 8,
+        background: "linear-gradient(180deg, #1d1712 0%, #171310 100%)"
+      }}
+    >
+      <div
+        style={{
+          minWidth: compareIds.length === 3 ? 980 : 720,
+          display: "grid",
+          gridTemplateColumns: `170px repeat(${compareIds.length}, minmax(250px, 1fr))`
+        }}
+      >
+
+        <div
+          style={{
+            padding: "18px 14px",
+            borderBottom: "1px solid #3B2A1E",
+            borderRight: "1px solid #3B2A1E"
+          }}
+        />
+
+        {compareIds.map((id) => {
+          const c = cigars.find((x) => x.id === id);
+          if (!c) return null;
+
+          return (
+            <div
+              key={`header-${id}`}
+              style={{
+                padding: "18px 16px",
+                borderBottom: "1px solid #3B2A1E",
+                borderRight: "1px solid #3B2A1E"
+              }}
+            >
+              {c.line && (
+                <div
+                  style={{
+                    fontFamily: "'Oswald', sans-serif",
+                    fontSize: 10,
+                    letterSpacing: 1.5,
+                    color: "#B8894C",
+                    textTransform: "uppercase"
+                  }}
+                >
+                  {c.line}
+                </div>
+              )}
+
+              <div
+                style={{
+                  fontFamily: "'Bebas Neue', sans-serif",
+                  fontSize: 28,
+                  letterSpacing: 0.5,
+                  marginTop: 2
+                }}
+              >
+                {c.name}
+              </div>
+            </div>
+          );
+        })}
+
+        {[
+          {
+            label: "Strength",
+            render: (c) => `${c.strength || "—"}/5 · ${strengthWord(c.strength)}`
+          },
+          {
+            label: "Body",
+            render: (c) => `${c.body || "—"}/5`
+          },
+          {
+            label: "Wrapper",
+            render: (c) => c.wrapper || "—"
+          },
+          {
+            label: "Binder",
+            render: (c) => c.binder || "—"
+          },
+          {
+            label: "Filler",
+            render: (c) => c.filler || "—"
+          },
+          {
+            label: "Origin",
+            render: (c) => c.origin || "—"
+          },
+          {
+            label: "Vitolas",
+            render: (c) =>
+              (c.sizes || [])
+                .map((s) =>
+                  `${s.vitola}${s.dims ? ` (${s.dims})` : ""}`
+                )
+                .join(", ") || "—"
+          },
+          {
+            label: "MSRP Range",
+            render: (c) => {
+              const prices = (c.sizes || [])
+                .map((s) => getNumericPrice(s, "msrp"))
+                .filter((v) => typeof v === "number");
+
+              if (!prices.length) return "—";
+
+              const min = Math.min(...prices);
+              const max = Math.max(...prices);
+
+              return min === max
+                ? `$${min.toFixed(2)}`
+                : `$${min.toFixed(2)} – $${max.toFixed(2)}`;
+            }
+          },
+          {
+            label: "Best Retail Margin",
+            render: (c) => {
+              const allMargins = (c.sizes || [])
+                .flatMap((s) => computePackageMargins(s) || []);
+
+              if (!allMargins.length) return "—";
+
+              const best = allMargins.reduce((a, b) =>
+                b.marginPct > a.marginPct ? b : a
+              );
+
+              return `${best.marginPct.toFixed(1)}%`;
+            }
+          },
+          {
+            label: "Best Box / Bundle Profit",
+            render: (c) => {
+              const allMargins = (c.sizes || [])
+                .flatMap((s) => computePackageMargins(s) || []);
+
+              if (!allMargins.length) return "—";
+
+              const best = allMargins.reduce((a, b) =>
+                b.grossProfit > a.grossProfit ? b : a
+              );
+
+              return `$${best.grossProfit.toFixed(2)} · ${best.label}`;
+            }
+          },
+          {
+            label: "Tasting Notes",
+            render: (c) =>
+              (c.tastingNotes || []).join(", ") || "—"
+          },
+          {
+            label: "Pairings",
+            render: (c) =>
+              (c.pairings || []).join(", ") || "—"
+          }
+        ].map((row) => (
+          <React.Fragment key={row.label}>
+
+            <div
+              style={{
+                padding: "13px 14px",
+                borderBottom: "1px solid #2c3036",
+                borderRight: "1px solid #3B2A1E",
+                fontFamily: "'Oswald', sans-serif",
+                fontSize: 10.5,
+                letterSpacing: 1.4,
+                textTransform: "uppercase",
+                color: "#8A93A0"
+              }}
+            >
+              {row.label}
+            </div>
+
             {compareIds.map((id) => {
               const c = cigars.find((x) => x.id === id);
               if (!c) return null;
+
               return (
-                <div key={id} style={{
-                  border: "1px solid #3B2A1E", borderRadius: 8, overflow: "hidden",
-                  background: "linear-gradient(180deg, #1d1712 0%, #171310 100%)",
-                }}>
-                  <div style={{ padding: "18px 20px", borderBottom: "1px solid #3B2A1E" }}>
-                    {c.line && (
-                      <div style={{ fontFamily: "'Oswald', sans-serif", fontSize: 11, letterSpacing: 2, color: "#B8894C", textTransform: "uppercase" }}>{c.line}</div>
-                    )}
-                    <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 32, letterSpacing: 0.5, lineHeight: 1.05, margin: "2px 0 12px" }}>{c.name}</div>
-                    <div style={{ display: "flex", gap: 16 }}>
-                      <Gauge value={c.strength} label="Strength" />
-                      <Gauge value={c.body} label="Body" />
-                    </div>
-                  </div>
-                  <div style={{ padding: "16px 20px", borderBottom: "1px solid #3B2A1E", display: "flex", flexDirection: "column", gap: 10 }}>
-                    {[["Wrapper", c.wrapper], ["Binder", c.binder], ["Filler", c.filler]].map(([label, val]) => (
-                      <div key={label}>
-                        <div style={{ fontFamily: "'Oswald', sans-serif", fontSize: 10.5, letterSpacing: 1.5, color: "#8A93A0", textTransform: "uppercase" }}>{label}</div>
-                        <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13.5, color: "#EDE6D6" }}>{val || "—"}</div>
-                      </div>
-                    ))}
-                  </div>
-                  <div style={{ padding: "16px 20px", borderBottom: "1px solid #3B2A1E" }}>
-                    <div style={{ fontFamily: "'Oswald', sans-serif", fontSize: 10.5, letterSpacing: 1.5, color: "#8A93A0", textTransform: "uppercase", marginBottom: 6 }}>Tasting Notes</div>
-                    {(c.tastingNotes || []).length ? c.tastingNotes.map((n, i) => <Tag key={i} tone="brass">{n}</Tag>) : <div style={{ color: "#5c636b", fontSize: 13, fontStyle: "italic" }}>None on file.</div>}
-                  </div>
-                  <div style={{ padding: "16px 20px", borderBottom: "1px solid #3B2A1E" }}>
-                    <div style={{ fontFamily: "'Oswald', sans-serif", fontSize: 10.5, letterSpacing: 1.5, color: "#8A93A0", textTransform: "uppercase", marginBottom: 6 }}>Pairings</div>
-                    {(c.pairings || []).length ? c.pairings.map((n, i) => <Tag key={i} tone="steel">{n}</Tag>) : <div style={{ color: "#5c636b", fontSize: 13, fontStyle: "italic" }}>None on file.</div>}
-                  </div>
-                  <div style={{ padding: "16px 20px" }}>
-                    <div style={{ fontFamily: "'Oswald', sans-serif", fontSize: 10.5, letterSpacing: 1.5, color: "#8A93A0", textTransform: "uppercase", marginBottom: 8 }}>Sizes & MSRP</div>
-                    {(c.sizes || []).length === 0 ? (
-                      <div style={{ color: "#5c636b", fontSize: 13, fontStyle: "italic" }}>No sizes on file.</div>
-                    ) : (
-                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                        {c.sizes.map((s) => (
-                          <div key={s.key} style={{ display: "flex", justifyContent: "space-between", fontFamily: "'JetBrains Mono', monospace", fontSize: 13 }}>
-                            <span style={{ color: "#E7C79A" }}>{s.vitola}{s.dims ? ` (${s.dims})` : ""}</span>
-                            <span style={{ color: "#B8894C" }}>{s.msrp || "—"}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
+                <div
+                  key={`${row.label}-${id}`}
+                  style={{
+                    padding: "13px 16px",
+                    borderBottom: "1px solid #2c3036",
+                    borderRight: "1px solid #3B2A1E",
+                    fontFamily: "'JetBrains Mono', monospace",
+                    fontSize: 12.5,
+                    lineHeight: 1.45,
+                    color:
+                      row.label.includes("Margin") ||
+                      row.label.includes("Profit")
+                        ? "#E7C79A"
+                        : "#EDE6D6"
+                  }}
+                >
+                  {row.render(c)}
                 </div>
               );
             })}
-          </div>
-        </div>
-      ) : selected ? (
+
+          </React.Fragment>
+        ))}
+
+      </div>
+    </div>
+
+    <div
+      style={{
+        marginTop: 14,
+        fontFamily: "'Oswald', sans-serif",
+        fontSize: 11.5,
+        color: "#6E7681"
+      }}
+    >
+      On smaller screens, swipe horizontally to view all selected cigars.
+    </div>
+
+  </div>
+) : selected ? (
         // ---------- DETAIL VIEW ----------
         <div style={{ maxWidth: 900, margin: "0 auto", padding: "24px" }}>
           <button className="hg-btn" onClick={() => setSelectedId(null)} style={{
@@ -1404,7 +1606,7 @@ if (packKey === "single") {
             </div>
           )}
 
-          {compareMode && compareIds.length === 2 && (
+          {compareMode && compareIds.length >= 2 && (
             <div style={{
               position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)",
               background: "#1c1f24", border: "1px solid #B8894C", borderRadius: 8,
@@ -1412,7 +1614,7 @@ if (packKey === "single") {
               boxShadow: "0 8px 24px rgba(0,0,0,0.5)", zIndex: 40,
             }}>
               <div style={{ fontFamily: "'Oswald', sans-serif", fontSize: 13, color: "#EDE6D6" }}>
-                {cigars.find((c) => c.id === compareIds[0])?.name} vs {cigars.find((c) => c.id === compareIds[1])?.name}
+               {compareIds.length} cigars selected
               </div>
               <button className="hg-btn" onClick={() => setShowCompare(true)} style={{
                 background: "#B8894C", border: "none", color: "#14161A", borderRadius: 4,
