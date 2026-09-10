@@ -1195,21 +1195,40 @@ if (packKey === "single") {
     );
   }
 },
-          {
-            label: "Best Box / Bundle Profit",
-            render: (c) => {
-              const allMargins = (c.sizes || [])
-                .flatMap((s) => computePackageMargins(s) || []);
+         {
+  label: "Best Box / Bundle Profit",
+  render: (c) => {
+    const allMargins = (c.sizes || [])
+      .flatMap((s) =>
+        (computePackageMargins(s) || []).map((m) => ({
+          ...m,
+          vitola: s.vitola
+        }))
+      );
 
-              if (!allMargins.length) return "—";
+    if (!allMargins.length) return "—";
 
-              const best = allMargins.reduce((a, b) =>
-                b.grossProfit > a.grossProfit ? b : a
-              );
+    const best = allMargins.reduce((a, b) =>
+      b.grossProfit > a.grossProfit ? b : a
+    );
 
-              return `$${best.grossProfit.toFixed(2)} · ${best.label}`;
-            }
-          },
+    return (
+      <>
+        <div>${best.grossProfit.toFixed(2)}</div>
+
+        <div
+          style={{
+            fontSize: 10.5,
+            color: "#8A93A0",
+            marginTop: 3
+          }}
+        >
+          {best.vitola} · {best.label}
+        </div>
+      </>
+    );
+  }
+},
           {
             label: "Tasting Notes",
             render: (c) =>
