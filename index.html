@@ -443,6 +443,7 @@ function HazeGrayReference() {
   const [showCompare, setShowCompare] = useState(false);
   const [compareOrderId, setCompareOrderId] = useState(null);
   const [showOrderBuilder, setShowOrderBuilder] = useState(false);
+  const [showFinalReview, setShowFinalReview] = useState(false);
   const [orderItems, setOrderItems] = useState([]);
   const [orderRetailer, setOrderRetailer] = useState("");
   const [orderEmail, setOrderEmail] = useState("");
@@ -1448,7 +1449,7 @@ const openOrderFromCompare = (cigarId) => {
                 display: "flex", alignItems: "center", gap: 8, background: "#B8894C", border: "none", color: "#14161A",
                 borderRadius: 4, padding: "10px 18px", fontFamily: "'Oswald', sans-serif", fontWeight: 600, fontSize: 13,
               }}>
-                <Mail size={15} /> Email Order
+                <Mail size={15} /> Email Summary
               </button>
               <button className="hg-btn" onClick={copyOrderText} style={{
                 display: "flex", alignItems: "center", gap: 8, background: "none", border: "1px solid #6E7681", color: "#C9CFD6",
@@ -1456,7 +1457,26 @@ const openOrderFromCompare = (cigarId) => {
               }}>
                 <Copy size={15} /> {copyConfirmed ? "Copied!" : "Copy Summary"}
               </button>
-
+<button
+  className="hg-btn"
+  onClick={() => setShowFinalReview(true)}
+  style={{
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    background: "#B8894C",
+    border: "none",
+    color: "#14161A",
+    borderRadius: 4,
+    padding: "10px 18px",
+    fontFamily: "'Oswald', sans-serif",
+    fontWeight: 600,
+    fontSize: 13
+  }}
+>
+  <ChevronRight size={15} />
+  Final Review
+</button>
 <button
   className="hg-btn"
   onClick={clearOrder}
