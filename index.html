@@ -553,7 +553,27 @@ function HazeGrayReference() {
     setOrderItems((prev) => prev.filter((li) => li.lineKey !== lineKey));
   };
 
-  const orderTotal = orderItems.reduce((sum, li) => sum + li.unitPrice * li.qty, 0);
+  const orderWholesaleTotal = orderItems.reduce(
+  (sum, li) => sum + li.unitPrice * li.qty,
+  0
+);
+
+const orderRetailTotal = orderItems.reduce(
+  (sum, li) =>
+    sum +
+    (typeof li.retailUnitValue === "number"
+      ? li.retailUnitValue * li.qty
+      : 0),
+  0
+);
+
+const orderGrossProfit =
+  orderRetailTotal - orderWholesaleTotal;
+
+const orderMarginPct =
+  orderRetailTotal > 0
+    ? (orderGrossProfit / orderRetailTotal) * 100
+    : 0;
 
   const buildOrderText = () => {
     const lines = orderItems.map(
@@ -565,7 +585,7 @@ function HazeGrayReference() {
       "",
       ...lines,
       "",
-      `Order Total: $${orderTotal.toFixed(2)}`,
+      `Wholesale Order Total: $${orderWholesaleTotal.toFixed(2)}`
       "",
       orderNotes ? `Notes: ${orderNotes}` : "",
     ].filter((l) => l !== "").join("\n");
