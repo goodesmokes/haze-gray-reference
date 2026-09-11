@@ -1283,28 +1283,44 @@ const openOrderFromCompare = (cigarId) => {
       const retailerName = orderRetailer.trim();
       const retailerEmail = orderEmail.trim();
 
-      const orderLines = orderItems.map((li) => {
-        const lineTotal = li.unitPrice * li.qty;
+     const pad = (value, width) => {
+  const text = String(value);
+  return text.length >= width
+    ? text.slice(0, width)
+    : text.padEnd(width, " ");
+};
 
-        return [
-          `${li.cigarName} — ${li.vitola}${li.dims ? ` (${li.dims})` : ""}`,
-          `${li.packLabel} × ${li.qty}`,
-          `Total: $${lineTotal.toFixed(2)}`
-        ].join("\n");
-      });
+const orderLines = orderItems.map((li) => {
+  const lineTotal = li.unitPrice * li.qty;
+  const size = `${li.vitola}${li.dims ? ` (${li.dims})` : ""}`;
 
-      const body = [
-        "HAZE GRAY CIGARS — FINAL ORDER",
-        "",
-        retailerName ? `Retailer: ${retailerName}` : "",
-        retailerEmail ? `Contact: ${retailerEmail}` : "",
-        "",
-        ...orderLines,
-        "",
-        `ORDER TOTAL: $${orderWholesaleTotal.toFixed(2)}`,
-        "",
-        orderNotes ? `Notes: ${orderNotes}` : ""
-      ].filter(Boolean).join("\n");
+  return (
+    pad(li.cigarName, 18) +
+    pad(size, 20) +
+    pad(li.packLabel, 16) +
+    pad(li.qty, 6) +
+    `$${lineTotal.toFixed(2)}`
+  );
+});
+
+     const body = [
+  "HAZE GRAY CIGARS — FINAL ORDER",
+  "",
+  retailerName ? `Retailer: ${retailerName}` : "",
+  retailerEmail ? `Contact: ${retailerEmail}` : "",
+  "",
+  pad("CIGAR", 18) +
+    pad("SIZE", 20) +
+    pad("PACKAGE", 16) +
+    pad("QTY", 6) +
+    "TOTAL",
+  "-".repeat(72),
+  ...orderLines,
+  "-".repeat(72),
+  `${"ORDER TOTAL".padStart(60, " ")}  $${orderWholesaleTotal.toFixed(2)}`,
+  "",
+  orderNotes ? `Notes: ${orderNotes}` : ""
+].filter(Boolean).join("\n");
 
       const subject = retailerName
         ? `Haze Gray Cigars Order — ${retailerName}`
