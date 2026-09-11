@@ -1276,6 +1276,134 @@ const openOrderFromCompare = (cigarId) => {
     </div>
   </div>
 )}
+<div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+  <button
+    className="hg-btn"
+    onClick={() => {
+      const retailerName = orderRetailer.trim();
+      const retailerEmail = orderEmail.trim();
+
+      const orderLines = orderItems.map((li) => {
+        const lineTotal = li.unitPrice * li.qty;
+
+        return [
+          `${li.cigarName} — ${li.vitola}${li.dims ? ` (${li.dims})` : ""}`,
+          `${li.packLabel} × ${li.qty}`,
+          `Total: $${lineTotal.toFixed(2)}`
+        ].join("\n");
+      });
+
+      const body = [
+        "HAZE GRAY CIGARS — FINAL ORDER",
+        "",
+        retailerName ? `Retailer: ${retailerName}` : "",
+        retailerEmail ? `Contact: ${retailerEmail}` : "",
+        "",
+        ...orderLines,
+        "",
+        `ORDER TOTAL: $${orderWholesaleTotal.toFixed(2)}`,
+        "",
+        orderNotes ? `Notes: ${orderNotes}` : ""
+      ].filter(Boolean).join("\n");
+
+      const subject = retailerName
+        ? `Haze Gray Cigars Order — ${retailerName}`
+        : "Haze Gray Cigars Order";
+
+      const mailto =
+        `mailto:${encodeURIComponent(retailerEmail)}` +
+        `?subject=${encodeURIComponent(subject)}` +
+        `&body=${encodeURIComponent(body)}`;
+
+      window.location.href = mailto;
+    }}
+    style={{
+      display: "flex",
+      alignItems: "center",
+      gap: 8,
+      background: "#B8894C",
+      border: "none",
+      color: "#14161A",
+      borderRadius: 4,
+      padding: "10px 18px",
+      fontFamily: "'Oswald', sans-serif",
+      fontWeight: 600,
+      fontSize: 13
+    }}
+  >
+    <Mail size={15} />
+    Email Order
+  </button>
+
+  <button
+    className="hg-btn"
+    onClick={async () => {
+      const orderLines = orderItems.map((li) => {
+        const lineTotal = li.unitPrice * li.qty;
+
+        return [
+          `${li.cigarName} — ${li.vitola}${li.dims ? ` (${li.dims})` : ""}`,
+          `${li.packLabel} × ${li.qty}`,
+          `Total: $${lineTotal.toFixed(2)}`
+        ].join("\n");
+      });
+
+      const text = [
+        "HAZE GRAY CIGARS — FINAL ORDER",
+        "",
+        orderRetailer ? `Retailer: ${orderRetailer}` : "",
+        orderEmail ? `Contact: ${orderEmail}` : "",
+        "",
+        ...orderLines,
+        "",
+        `ORDER TOTAL: $${orderWholesaleTotal.toFixed(2)}`,
+        "",
+        orderNotes ? `Notes: ${orderNotes}` : ""
+      ].filter(Boolean).join("\n");
+
+      await navigator.clipboard.writeText(text);
+      setCopyConfirmed(true);
+      setTimeout(() => setCopyConfirmed(false), 2000);
+    }}
+    style={{
+      display: "flex",
+      alignItems: "center",
+      gap: 8,
+      background: "none",
+      border: "1px solid #6E7681",
+      color: "#C9CFD6",
+      borderRadius: 4,
+      padding: "10px 18px",
+      fontFamily: "'Oswald', sans-serif",
+      fontWeight: 500,
+      fontSize: 13
+    }}
+  >
+    <Copy size={15} />
+    {copyConfirmed ? "Copied!" : "Copy Order"}
+  </button>
+
+  <button
+    className="hg-btn"
+    onClick={() => setShowFinalReview(false)}
+    style={{
+      display: "flex",
+      alignItems: "center",
+      gap: 8,
+      background: "none",
+      border: "1px solid #6E7681",
+      color: "#C9CFD6",
+      borderRadius: 4,
+      padding: "10px 18px",
+      fontFamily: "'Oswald', sans-serif",
+      fontWeight: 500,
+      fontSize: 13
+    }}
+  >
+    <ArrowLeft size={15} />
+    Back to Builder
+  </button>
+</div>
   </div>
 
 ) : showOrderBuilder ? (
