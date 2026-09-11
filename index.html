@@ -618,11 +618,40 @@ const orderMarginPct =
   ].join("\n");
 };
 
-  const emailOrder = () => {
-    const subject = encodeURIComponent(`Haze Gray Cigars Order${orderRetailer ? " - " + orderRetailer : ""}`);
-    const body = encodeURIComponent(buildOrderText());
-    window.location.href = `mailto:?subject=${subject}&body=${body}`;
-  };
+ const emailOrder = () => {
+  if (orderItems.length === 0) {
+    alert("Add at least one item to the order before emailing.");
+    return;
+  }
+
+  const retailerName = orderRetailer.trim();
+  const retailerEmail = orderEmail.trim();
+
+  const subject = retailerName
+    ? `Haze Gray Cigars Order — ${retailerName}`
+    : "Haze Gray Cigars Order";
+
+  const summary = buildOrderText();
+
+  const body = [
+    retailerName ? `Hello ${retailerName},` : "Hello,",
+    "",
+    "Thank you for your interest in Haze Gray Cigars.",
+    "",
+    "Below is the order summary we discussed, including suggested retail value and projected retailer economics.",
+    "",
+    summary,
+    "",
+    "Please review the order and let me know if you have any questions or would like to make any changes.",
+  ].join("\n");
+
+  const mailto =
+    `mailto:${encodeURIComponent(retailerEmail)}` +
+    `?subject=${encodeURIComponent(subject)}` +
+    `&body=${encodeURIComponent(body)}`;
+
+  window.location.href = mailto;
+};
 
   const copyOrderText = async () => {
     try {
