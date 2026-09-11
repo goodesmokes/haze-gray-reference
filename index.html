@@ -575,21 +575,50 @@ const orderMarginPct =
     ? (orderGrossProfit / orderRetailTotal) * 100
     : 0;
 
-  const buildOrderText = () => {
-    const lines = orderItems.map(
-      (li) => `${li.cigarName} — ${li.vitola}${li.dims ? " (" + li.dims + ")" : ""} — ${li.packLabel} x${li.qty} — $${(li.unitPrice * li.qty).toFixed(2)}`
-    );
+ const buildOrderText = () => {
+  const lines = orderItems.map((li) => {
+    const lineWholesale = li.unitPrice * li.qty;
+
+    const lineRetail =
+      typeof li.retailUnitValue === "number"
+        ? li.retailUnitValue * li.qty
+        : 0;
+
+    const lineProfit = lineRetail - lineWholesale;
+
+    const lineMargin =
+      lineRetail > 0
+        ? (lineProfit / lineRetail) * 100
+        : 0;
+
     return [
-      `Retailer: ${orderRetailer || "—"}`,
-      `Contact: ${orderEmail || "—"}`,
-      "",
-      ...lines,
-      "",
-      `Wholesale Order Total: $${orderWholesaleTotal.toFixed(2)}`,
-      "",
-      orderNotes ? `Notes: ${orderNotes}` : "",
-    ].filter((l) => l !== "").join("\n");
-  };
+      `${li.cigarName} — ${li.vitola}${li.dims ? " (" + li.dims + ")" : ""}`,
+      `${li.packLabel} x${li.qty}`,
+      `Wholesale: $${lineWholesale.toFixed(2)}`,
+      `Retail Value: $${lineRetail.toFixed(2)}`,
+      `Gross Profit: $${lineProfit.toFixed(2)}`,
+      `Margin: ${lineMargin.toFixed(1)}%`,
+    ].join("\n");
+  });
+
+  return [
+    "HAZE GRAY CIGARS — RETAILER ORDER SUMMARY",
+    "",
+    `Retailer: ${orderRetailer || "—"}`,
+    `Contact: ${orderEmail || "—"}`,
+    "",
+    ...lines.flatMap((line) => [line, ""]),
+    "ORDER TOTALS",
+    `Wholesale: $${orderWholesaleTotal.toFixed(2)}`,
+    `Retail Value: $${orderRetailTotal.toFixed(2)}`,
+    `Gross Profit: $${orderGrossProfit.toFixed(2)}`,
+    `Margin: ${orderMarginPct.toFixed(1)}%`,
+    "",
+    orderNotes ? `Notes: ${orderNotes}` : "",
+  ]
+    .filter((l) => l !== "")
+    .join("\n");
+};
 
   const emailOrder = () => {
     const subject = encodeURIComponent(`Haze Gray Cigars Order${orderRetailer ? " - " + orderRetailer : ""}`);
