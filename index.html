@@ -491,9 +491,19 @@ if (packKey === "single") {
     });
   };
 
-  const setOrderQty = (lineKey, qty) => {
-    setOrderItems((prev) => prev.map((li) => (li.lineKey === lineKey ? { ...li, qty: Math.max(1, qty) } : li)));
-  };
+ const setOrderQty = (lineKey, qty) => {
+  setOrderItems((prev) => {
+    if (qty <= 0) {
+      return prev.filter((li) => li.lineKey !== lineKey);
+    }
+
+    return prev.map((li) =>
+      li.lineKey === lineKey
+        ? { ...li, qty }
+        : li
+    );
+  });
+};
 
   const removeOrderItem = (lineKey) => {
     setOrderItems((prev) => prev.filter((li) => li.lineKey !== lineKey));
