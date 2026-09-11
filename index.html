@@ -1058,21 +1058,205 @@ const openOrderFromCompare = (cigarId) => {
             <div style={{ color: "#5c636b", fontSize: 13.5, fontStyle: "italic", marginBottom: 20 }}>No items added yet — use the buttons above.</div>
           ) : (
             <div style={{ border: "1px solid #2c3036", borderRadius: 8, overflow: "hidden", marginBottom: 20 }}>
-              {orderItems.map((li) => (
-                <div key={li.lineKey} style={{
-                  display: "flex", alignItems: "center", gap: 10, padding: "10px 14px",
-                  borderBottom: "1px solid #2c3036", flexWrap: "wrap",
-                }}>
-                  <div style={{ flex: 1, minWidth: 180, fontFamily: "'Oswald', sans-serif", fontSize: 13, color: "#EDE6D6" }}>
-                    {li.cigarName} — {li.vitola}{li.dims ? ` (${li.dims})` : ""} — {li.packLabel}
-                  </div>
-                  <button className="hg-btn" onClick={() => setOrderQty(li.lineKey, li.qty - 1)} style={{ background: "none", border: "1px solid #454b53", color: "#C9CFD6", borderRadius: 4, width: 26, height: 26, display: "flex", alignItems: "center", justifyContent: "center" }}><Minus size={12} /></button>
-                  <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, color: "#EDE6D6", minWidth: 22, textAlign: "center" }}>{li.qty}</div>
-                  <button className="hg-btn" onClick={() => setOrderQty(li.lineKey, li.qty + 1)} style={{ background: "none", border: "1px solid #454b53", color: "#C9CFD6", borderRadius: 4, width: 26, height: 26, display: "flex", alignItems: "center", justifyContent: "center" }}><Plus size={12} /></button>
-                  <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13.5, color: "#B8894C", minWidth: 70, textAlign: "right" }}>${(li.unitPrice * li.qty).toFixed(2)}</div>
-                  <button className="hg-btn" onClick={() => removeOrderItem(li.lineKey)} style={{ background: "none", border: "none", color: "#8A93A0" }}><X size={16} /></button>
-                </div>
-              ))}
+             {orderItems.map((li) => {
+  const lineWholesale = li.unitPrice * li.qty;
+
+  const lineRetail =
+    typeof li.retailUnitValue === "number"
+      ? li.retailUnitValue * li.qty
+      : 0;
+
+  const lineProfit = lineRetail - lineWholesale;
+
+  const lineMargin =
+    lineRetail > 0
+      ? (lineProfit / lineRetail) * 100
+      : 0;
+
+  return (
+    <div
+      key={li.lineKey}
+      style={{
+        padding: "12px 14px",
+        borderBottom: "1px solid #2c3036"
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          flexWrap: "wrap"
+        }}
+      >
+        <div
+          style={{
+            flex: 1,
+            minWidth: 180,
+            fontFamily: "'Oswald', sans-serif",
+            fontSize: 13,
+            color: "#EDE6D6"
+          }}
+        >
+          {li.cigarName} — {li.vitola}
+          {li.dims ? ` (${li.dims})` : ""} — {li.packLabel}
+        </div>
+
+        <button
+          className="hg-btn"
+          onClick={() => setOrderQty(li.lineKey, li.qty - 1)}
+          style={{
+            background: "none",
+            border: "1px solid #454b53",
+            color: "#C9CFD6",
+            borderRadius: 4,
+            width: 26,
+            height: 26,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center"
+          }}
+        >
+          <Minus size={12} />
+        </button>
+
+        <div
+          style={{
+            fontFamily: "'JetBrains Mono', monospace",
+            fontSize: 13,
+            color: "#EDE6D6",
+            minWidth: 22,
+            textAlign: "center"
+          }}
+        >
+          {li.qty}
+        </div>
+
+        <button
+          className="hg-btn"
+          onClick={() => setOrderQty(li.lineKey, li.qty + 1)}
+          style={{
+            background: "none",
+            border: "1px solid #454b53",
+            color: "#C9CFD6",
+            borderRadius: 4,
+            width: 26,
+            height: 26,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center"
+          }}
+        >
+          <Plus size={12} />
+        </button>
+
+        <button
+          className="hg-btn"
+          onClick={() => removeOrderItem(li.lineKey)}
+          style={{
+            background: "none",
+            border: "none",
+            color: "#8A93A0"
+          }}
+        >
+          <X size={16} />
+        </button>
+      </div>
+
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns:
+            "repeat(auto-fit, minmax(110px, 1fr))",
+          gap: 10,
+          marginTop: 10,
+          paddingTop: 9,
+          borderTop: "1px solid rgba(69,75,83,0.45)"
+        }}
+      >
+        <div>
+          <div style={{
+            fontFamily: "'Oswald', sans-serif",
+            fontSize: 9.5,
+            letterSpacing: 1.2,
+            color: "#8A93A0",
+            textTransform: "uppercase"
+          }}>
+            Wholesale
+          </div>
+          <div style={{
+            fontFamily: "'JetBrains Mono', monospace",
+            fontSize: 13,
+            color: "#EDE6D6",
+            marginTop: 2
+          }}>
+            ${lineWholesale.toFixed(2)}
+          </div>
+        </div>
+
+        <div>
+          <div style={{
+            fontFamily: "'Oswald', sans-serif",
+            fontSize: 9.5,
+            letterSpacing: 1.2,
+            color: "#8A93A0",
+            textTransform: "uppercase"
+          }}>
+            Retail Value
+          </div>
+          <div style={{
+            fontFamily: "'JetBrains Mono', monospace",
+            fontSize: 13,
+            color: "#EDE6D6",
+            marginTop: 2
+          }}>
+            ${lineRetail.toFixed(2)}
+          </div>
+        </div>
+
+        <div>
+          <div style={{
+            fontFamily: "'Oswald', sans-serif",
+            fontSize: 9.5,
+            letterSpacing: 1.2,
+            color: "#8A93A0",
+            textTransform: "uppercase"
+          }}>
+            Gross Profit
+          </div>
+          <div style={{
+            fontFamily: "'JetBrains Mono', monospace",
+            fontSize: 13,
+            color: "#B8894C",
+            marginTop: 2
+          }}>
+            ${lineProfit.toFixed(2)}
+          </div>
+        </div>
+
+        <div>
+          <div style={{
+            fontFamily: "'Oswald', sans-serif",
+            fontSize: 9.5,
+            letterSpacing: 1.2,
+            color: "#8A93A0",
+            textTransform: "uppercase"
+          }}>
+            Margin
+          </div>
+          <div style={{
+            fontFamily: "'JetBrains Mono', monospace",
+            fontSize: 13,
+            color: "#B8894C",
+            marginTop: 2
+          }}>
+            {lineMargin.toFixed(1)}%
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+})}
               <div
   style={{
     display: "grid",
