@@ -1341,28 +1341,31 @@ const body = [
   <button
     className="hg-btn"
     onClick={async () => {
-      const orderLines = orderItems.map((li) => {
-        const lineTotal = li.unitPrice * li.qty;
+      const orderLines = orderItems.map((li, index) => {
+  const lineTotal = li.unitPrice * li.qty;
+  const size = `${li.vitola}${li.dims ? ` (${li.dims})` : ""}`;
 
-        return [
-          `${li.cigarName} — ${li.vitola}${li.dims ? ` (${li.dims})` : ""}`,
-          `${li.packLabel} × ${li.qty}`,
-          `Total: $${lineTotal.toFixed(2)}`
-        ].join("\n");
-      });
+  return [
+    `${index + 1}. ${li.cigarName}`,
+    `   ${size}`,
+    `   Package: ${li.packLabel}`,
+    `   Quantity: ${li.qty}`,
+    `   Line Total: $${lineTotal.toFixed(2)}`
+  ].join("\n");
+});
 
-      const text = [
-        "HAZE GRAY CIGARS — FINAL ORDER",
-        "",
-        orderRetailer ? `Retailer: ${orderRetailer}` : "",
-        orderEmail ? `Contact: ${orderEmail}` : "",
-        "",
-        ...orderLines,
-        "",
-        `ORDER TOTAL: $${orderWholesaleTotal.toFixed(2)}`,
-        "",
-        orderNotes ? `Notes: ${orderNotes}` : ""
-      ].filter(Boolean).join("\n");
+const text = [
+  "HAZE GRAY CIGARS — FINAL ORDER",
+  "",
+  orderRetailer ? `Retailer: ${orderRetailer}` : "",
+  orderEmail ? `Contact: ${orderEmail}` : "",
+  "",
+  ...orderLines.flatMap((line) => [line, ""]),
+  "----------------------------------------",
+  `ORDER TOTAL: $${orderWholesaleTotal.toFixed(2)}`,
+  "",
+  orderNotes ? `Notes: ${orderNotes}` : ""
+].join("\n");
 
       await navigator.clipboard.writeText(text);
       setCopyConfirmed(true);
