@@ -553,6 +553,14 @@ function HazeGrayReference() {
     setOrderItems((prev) => prev.filter((li) => li.lineKey !== lineKey));
   };
 
+  const clearOrder = () => {
+  setOrderItems([]);
+  setOrderRetailer("");
+  setOrderEmail("");
+  setOrderNotes("");
+  setCompareOrderId(null);
+};
+  
   const orderWholesaleTotal = orderItems.reduce(
   (sum, li) => sum + li.unitPrice * li.qty,
   0
@@ -1448,6 +1456,29 @@ const openOrderFromCompare = (cigarId) => {
               }}>
                 <Copy size={15} /> {copyConfirmed ? "Copied!" : "Copy Summary"}
               </button>
+
+<button
+  className="hg-btn"
+  onClick={clearOrder}
+  style={{
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    background: "none",
+    border: "1px solid #6E7681",
+    color: "#C9CFD6",
+    borderRadius: 4,
+    padding: "10px 18px",
+    fontFamily: "'Oswald', sans-serif",
+    fontWeight: 500,
+    fontSize: 13
+  }}
+>
+  <X size={15} />
+  Clear Order
+</button>
+
+</div>      
             </div>
           )}
         </div>
