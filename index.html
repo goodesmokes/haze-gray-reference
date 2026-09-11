@@ -469,27 +469,71 @@ function HazeGrayReference() {
 ];
 
   const addToOrder = (cigar, size, packKey) => {
-    const pack = PACK_OPTIONS.find((p) => p.key === packKey);
-    let unitPrice = null;
+  const pack = PACK_OPTIONS.find((p) => p.key === packKey);
 
-if (packKey === "single") {
-  unitPrice = getSinglePrice(size, "box");
-} else {
-  unitPrice = getNumericPrice(size, packKey);
-}
-    if (unitPrice == null) return;
-    const lineKey = `${cigar.id}__${size.key}__${packKey}`;
-    setOrderItems((prev) => {
-      const existing = prev.find((li) => li.lineKey === lineKey);
-      if (existing) {
-        return prev.map((li) => (li.lineKey === lineKey ? { ...li, qty: li.qty + 1 } : li));
-      }
-      return [...prev, {
-        lineKey, cigarName: cigar.name, vitola: size.vitola, dims: size.dims,
-        packLabel: pack.label, unitPrice, qty: 1,
-      }];
-    });
-  };
+  let unitPrice = null;
+
+  if (packKey === "single") {
+    unitPrice = getSinglePrice(size, "box");
+  } else {
+    unitPrice = getNumericPrice(size, packKey);
+  }
+
+  if (unitPrice == null) return;
+
+  const msrp = getNumericPrice(size, "msrp");
+
+  let retailUnitValue = null;
+
+  if (msrp != null) {
+    if (packKey === "single") {
+      retailUnitValue = msrp;
+    } else if (packKey === "box10") {
+      retailUnitValue = msrp * 10;
+    } else if (
+      packKey === "box20" ||
+      packKey === "bundle20"
+    ) {
+      retailUnitValue = msrp * 20;
+    }
+  }
+
+  const lineKey = `${cigar.id}__${size.key}__${packKey}`;
+
+  setOrderItems((prev) => {
+    const existing = prev.find(
+      (li) => li.lineKey === lineKey
+    );
+
+    if (existing) {
+      return prev.map((li) =>
+        li.lineKey === lineKey
+          ? { ...li, qty: li.qty + 1 }
+          : li
+      );
+    }
+
+    return [
+      ...prev,
+      {
+        lineKey,
+        cigarId: cigar.id,
+        cigarName: cigar.name,
+        vitola: size.vitola,
+        dims: size.dims,
+        packKey,
+        packLabel: pack.label,
+        unitPrice,
+        retailUnitValue,
+        qty: 1,
+      },
+    ];
+  });
+
+  if (compareOrderId === cigar.id) {
+    setCompareOrderId(null);
+  }
+};
 
  const setOrderQty = (lineKey, qty) => {
   setOrderItems((prev) => {
