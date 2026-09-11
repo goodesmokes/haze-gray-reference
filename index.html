@@ -1287,12 +1287,13 @@ const openOrderFromCompare = (cigarId) => {
   const lineTotal = li.unitPrice * li.qty;
   const size = `${li.vitola}${li.dims ? ` (${li.dims})` : ""}`;
 
-  return [
-    `${index + 1}. ${li.cigarName}`,
-    `   ${size}`,
-    `   ${li.packLabel} × ${li.qty}`,
-    `   Line Total: $${lineTotal.toFixed(2)}`
-  ].join("\n");
+ return [
+  `${index + 1}. ${li.cigarName}`,
+  `   ${size}`,
+  `   Package: ${li.packLabel}`,
+  `   Quantity: ${li.qty}`,
+  `   Line Total: $${lineTotal.toFixed(2)}`
+].join("\n");
 });
 
 const body = [
