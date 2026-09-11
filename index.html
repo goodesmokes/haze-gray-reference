@@ -532,7 +532,21 @@ if (packKey === "single") {
       // no-op
     }
   };
+const openOrderFromCompare = (cigarId) => {
+  setCompareOrderId(cigarId);
+  setShowCompare(false);
+  setShowOrderBuilder(true);
 
+  setTimeout(() => {
+    const el = document.getElementById(`order-cigar-${cigarId}`);
+    if (el) {
+      el.scrollIntoView({
+        behavior: "smooth",
+        block: "center"
+      });
+    }
+  }, 100);
+};
   const toggleCompareId = (id) => {
     setCompareIds((prev) => {
       if (prev.includes(id)) return prev.filter((x) => x !== id);
@@ -912,7 +926,20 @@ if (packKey === "single") {
           <div style={{ fontFamily: "'Oswald', sans-serif", fontSize: 13, letterSpacing: 1.5, color: "#8A93A0", textTransform: "uppercase", marginBottom: 10 }}>Add Cigars</div>
           <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 24 }}>
             {cigars.map((c) => (
-              <div key={c.id} style={{ border: "1px solid #2c3036", borderRadius: 6, padding: "12px 14px" }}>
+             <div
+  key={c.id}
+  id={`order-cigar-${c.id}`}
+  style={{
+    border: compareOrderId === c.id
+      ? "1px solid #B8894C"
+      : "1px solid #2c3036",
+    borderRadius: 6,
+    padding: "12px 14px",
+    background: compareOrderId === c.id
+      ? "rgba(184,137,76,0.06)"
+      : "transparent"
+  }}
+>
                 <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 18, letterSpacing: 0.5, marginBottom: 8 }}>{c.name}</div>
                 {(c.sizes || []).length === 0 ? (
                   <div style={{ color: "#5c636b", fontSize: 12.5, fontStyle: "italic" }}>No sizes on file.</div>
@@ -1285,7 +1312,63 @@ if (packKey === "single") {
 
           </React.Fragment>
         ))}
+<div
+  style={{
+    padding: "14px",
+    borderRight: "1px solid #3B2A1E",
+    background: "rgba(184,137,76,0.04)"
+  }}
+>
+  <div
+    style={{
+      fontFamily: "'Oswald', sans-serif",
+      fontSize: 10.5,
+      letterSpacing: 1.4,
+      textTransform: "uppercase",
+      color: "#8A93A0"
+    }}
+  >
+    Order
+  </div>
+</div>
 
+{compareIds.map((id) => {
+  const c = cigars.find((x) => x.id === id);
+  if (!c) return null;
+
+  return (
+    <div
+      key={`order-${id}`}
+      style={{
+        padding: "14px 16px",
+        borderRight: "1px solid #3B2A1E",
+        background: "rgba(184,137,76,0.04)"
+      }}
+    >
+      <button
+        type="button"
+        className="hg-btn"
+        onClick={() => openOrderFromCompare(c.id)}
+        style={{
+          width: "100%",
+          background: "#B8894C",
+          border: "none",
+          color: "#14161A",
+          borderRadius: 4,
+          padding: "10px 14px",
+          fontFamily: "'Oswald', sans-serif",
+          fontWeight: 600,
+          fontSize: 12.5,
+          letterSpacing: 0.8,
+          textTransform: "uppercase"
+        }}
+      >
+        <ShoppingCart size={14} style={{ marginRight: 6, verticalAlign: "middle" }} />
+        Build Order
+      </button>
+    </div>
+  );
+})}
       </div>
     </div>
 
