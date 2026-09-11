@@ -1034,9 +1034,59 @@ const openOrderFromCompare = (cigarId) => {
 
       {loading ? (
         <div style={{ padding: 40, fontFamily: "'Oswald', sans-serif", color: "#8A93A0" }}>Loading manifest…</div>
-      ) : showOrderBuilder ? (
-        // ---------- ORDER BUILDER ----------
-        <div style={{ maxWidth: 900, margin: "0 auto", padding: "24px" }}>
+    ) : showFinalReview ? (
+  // ---------- FINAL REVIEW ----------
+  <div style={{ maxWidth: 900, margin: "0 auto", padding: "24px" }}>
+
+    <button
+      className="hg-btn"
+      onClick={() => setShowFinalReview(false)}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 6,
+        background: "none",
+        border: "none",
+        color: "#B8894C",
+        fontFamily: "'Oswald', sans-serif",
+        fontSize: 13,
+        letterSpacing: 1,
+        textTransform: "uppercase",
+        padding: "6px 0",
+        marginBottom: 18
+      }}
+    >
+      <ArrowLeft size={16} /> Back to Order Builder
+    </button>
+
+    <div
+      style={{
+        fontFamily: "'Bebas Neue', sans-serif",
+        fontSize: 32,
+        letterSpacing: 1,
+        marginBottom: 6
+      }}
+    >
+      Final Review
+    </div>
+
+    <div
+      style={{
+        fontFamily: "'Oswald', sans-serif",
+        color: "#8A93A0",
+        fontSize: 13,
+        letterSpacing: 1,
+        marginBottom: 24
+      }}
+    >
+      REVIEW ORDER BEFORE SUBMISSION
+    </div>
+
+  </div>
+
+) : showOrderBuilder ? (
+  // ---------- ORDER BUILDER ----------
+  <div style={{ maxWidth: 900, margin: "0 auto", padding: "24px" }}>
           <button className="hg-btn" onClick={() => setShowOrderBuilder(false)} style={{
             display: "flex", alignItems: "center", gap: 6, background: "none", border: "none",
             color: "#B8894C", fontFamily: "'Oswald', sans-serif", fontSize: 13, letterSpacing: 1,
