@@ -430,6 +430,34 @@ function Tag({ children, tone = "steel" }) {
   );
 }
 
+const ORDER_DRAFT_STORAGE_KEY = "haze-gray-cigars.order-draft.v1";
+
+function loadOrderDraft() {
+  try {
+    const draft = JSON.parse(localStorage.getItem(ORDER_DRAFT_STORAGE_KEY));
+    if (!draft || typeof draft !== "object") return {};
+    const orderItems = Array.isArray(draft.orderItems)
+      ? draft.orderItems.filter((item) =>
+          item &&
+          ["lineKey", "cigarId", "cigarName", "vitola", "dims", "packKey", "packLabel"]
+            .every((key) => typeof item[key] === "string") &&
+          Number.isFinite(item.unitPrice) &&
+          Number.isInteger(item.qty) && item.qty > 0 &&
+          (item.retailUnitValue === null || Number.isFinite(item.retailUnitValue))
+        )
+      : [];
+    return {
+      orderItems,
+      orderRetailer: typeof draft.orderRetailer === "string" ? draft.orderRetailer : "",
+      orderEmail: typeof draft.orderEmail === "string" ? draft.orderEmail : "",
+      orderNotes: typeof draft.orderNotes === "string" ? draft.orderNotes : "",
+    };
+  } catch (e) {
+    // Corrupt or unavailable storage must not prevent the app from loading.
+    return {};
+  }
+}
+
 function HazeGrayReference() {
   const [cigars, setCigars] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -444,11 +472,26 @@ function HazeGrayReference() {
   const [compareOrderId, setCompareOrderId] = useState(null);
   const [showOrderBuilder, setShowOrderBuilder] = useState(false);
   const [showFinalReview, setShowFinalReview] = useState(false);
-  const [orderItems, setOrderItems] = useState([]);
-  const [orderRetailer, setOrderRetailer] = useState("");
-  const [orderEmail, setOrderEmail] = useState("");
-  const [orderNotes, setOrderNotes] = useState("");
+  const [initialOrderDraft] = useState(loadOrderDraft);
+  const [orderItems, setOrderItems] = useState(initialOrderDraft.orderItems || []);
+  const [orderRetailer, setOrderRetailer] = useState(initialOrderDraft.orderRetailer || "");
+  const [orderEmail, setOrderEmail] = useState(initialOrderDraft.orderEmail || "");
+  const [orderNotes, setOrderNotes] = useState(initialOrderDraft.orderNotes || "");
   const [copyConfirmed, setCopyConfirmed] = useState(false);
+
+  useEffect(() => {
+    try {
+      if (!orderItems.length && !orderRetailer && !orderEmail && !orderNotes) {
+        localStorage.removeItem(ORDER_DRAFT_STORAGE_KEY);
+      } else {
+        localStorage.setItem(ORDER_DRAFT_STORAGE_KEY, JSON.stringify({
+          orderItems, orderRetailer, orderEmail, orderNotes,
+        }));
+      }
+    } catch (e) {
+      // Keep the in-memory order usable when browser storage is unavailable or full.
+    }
+  }, [orderItems, orderRetailer, orderEmail, orderNotes]);
 
   const PACK_OPTIONS = [
   {
@@ -555,6 +598,11 @@ function HazeGrayReference() {
   };
 
   const clearOrder = () => {
+  try {
+    localStorage.removeItem(ORDER_DRAFT_STORAGE_KEY);
+  } catch (e) {
+    // Clearing the in-memory order should still work if storage is unavailable.
+  }
   setOrderItems([]);
   setOrderRetailer("");
   setOrderEmail("");
