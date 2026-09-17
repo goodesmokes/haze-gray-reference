@@ -51,10 +51,10 @@ const ROLE_LABELS = Object.freeze({ owner: "Owner", admin: "Admin", field_rep: "
 const NO_PERMISSIONS = Object.freeze({
   canEditCatalog: false, canEditPackages: false, canUseOrderBuilder: false,
   canUseFinalReview: false, canManageUsers: false, canMigrateLegacyData: false,
-  protectOwnRole: false,
+  canManageOwners: false,
 });
 const ROLE_PERMISSIONS = Object.freeze({
-  owner: Object.freeze({ ...NO_PERMISSIONS, canEditCatalog: true, canEditPackages: true, canUseOrderBuilder: true, canUseFinalReview: true, canManageUsers: true, canMigrateLegacyData: true, protectOwnRole: true }),
+  owner: Object.freeze({ ...NO_PERMISSIONS, canEditCatalog: true, canEditPackages: true, canUseOrderBuilder: true, canUseFinalReview: true, canManageUsers: true, canMigrateLegacyData: true, canManageOwners: true }),
   admin: Object.freeze({ ...NO_PERMISSIONS, canEditCatalog: true, canEditPackages: true, canUseOrderBuilder: true, canUseFinalReview: true, canManageUsers: true }),
   field_rep: Object.freeze({ ...NO_PERMISSIONS, canUseOrderBuilder: true, canUseFinalReview: true }),
   viewer: NO_PERMISSIONS,
@@ -62,12 +62,29 @@ const ROLE_PERMISSIONS = Object.freeze({
 const isValidRole = (role) => typeof role === "string" && Object.prototype.hasOwnProperty.call(ROLE_PERMISSIONS, role);
 const isActiveProfile = (profile) => profile?.active === true && isValidRole(profile.role);
 const getProfilePermissions = (profile) => isActiveProfile(profile) ? ROLE_PERMISSIONS[profile.role] : NO_PERMISSIONS;
+const getAssignableRoles = (managerProfile) => {
+  const permissions = getProfilePermissions(managerProfile);
+  if (!permissions.canManageUsers) return [];
+  return Object.keys(ROLE_LABELS).filter((role) => role !== "owner" || permissions.canManageOwners);
+};
+const canManageAuthorizationProfile = (managerProfile, profile) => Boolean(profile &&
+  getProfilePermissions(managerProfile).canManageUsers &&
+  (getProfilePermissions(managerProfile).canManageOwners || getAssignableRoles(managerProfile).includes(profile.role)));
+const authorizationUpdateError = (managerProfile, currentUid, targetUid, profile, changes) => {
+  if (!canManageAuthorizationProfile(managerProfile, profile)) return "You are not authorized to edit this authorization profile.";
+  if (!getAssignableRoles(managerProfile).includes(changes.role)) return "You are not authorized to assign this role.";
+  if (currentUid === targetUid) {
+    if (changes.role !== profile.role) return "You cannot change your own authorization role.";
+    if (changes.active !== true) return "You cannot disable your own authorization profile.";
+  }
+  return "";
+};
 
 // Application authorization only. Firestore Security Rules remain the enforcement boundary.
 const userFieldStyle = { width: "100%", background: "#14161A", border: "1px solid #454b53", borderRadius: 4, padding: "8px 10px", color: "#EDE6D6", fontSize: 14 };
 const userButtonStyle = { background: "none", border: "1px solid #6E7681", color: "#C9CFD6", borderRadius: 4, padding: "8px 14px", fontFamily: "'Oswald', sans-serif", fontSize: 13 };
 
-function AuthorizationProfileEditor({ profile, currentUid, protectOwnRole, onSave, onClose }) {
+function AuthorizationProfileEditor({ profile, currentUid, managerProfile, onSave, onClose }) {
   const [role, setRole] = useState(profile.role || "");
   const [territory, setTerritory] = useState(profile.territory || "");
   const [active, setActive] = useState(profile.active === true);
@@ -85,6 +102,8 @@ function AuthorizationProfileEditor({ profile, currentUid, protectOwnRole, onSav
     setSaving(true);
     setSaveError("");
     try {
+      const authorizationError = authorizationUpdateError(managerProfile, currentUid, profile.uid, profile, { role, active });
+      if (authorizationError) throw new Error(authorizationError);
       await onSave(profile.uid, { role, territory, active });
       if (mounted.current) onClose();
     } catch (e) {
@@ -99,9 +118,9 @@ function AuthorizationProfileEditor({ profile, currentUid, protectOwnRole, onSav
       <div style={{ color: "#C9CFD6", marginBottom: 16 }}>{profile.displayName || profile.email || profile.uid}</div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 14 }}>
         <label style={{ fontFamily: "'Oswald', sans-serif", color: "#8A93A0" }}>Role
-          <select aria-label="Authorization role" value={role} disabled={saving || (isSelf && protectOwnRole)} onChange={(e) => setRole(e.target.value)} style={userFieldStyle}>
-            {!isValidRole(role) && <option value={role}>Select a valid role</option>}
-            {Object.entries(ROLE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+          <select aria-label="Authorization role" value={getAssignableRoles(managerProfile).includes(role) ? role : ""} disabled={saving || isSelf} onChange={(e) => setRole(e.target.value)} style={userFieldStyle}>
+            {!getAssignableRoles(managerProfile).includes(role) && <option value="">Select an allowed role</option>}
+            {getAssignableRoles(managerProfile).map((value) => <option key={value} value={value}>{ROLE_LABELS[value]}</option>)}
           </select>
         </label>
         <label style={{ fontFamily: "'Oswald', sans-serif", color: "#8A93A0" }}>Territory
@@ -113,7 +132,7 @@ function AuthorizationProfileEditor({ profile, currentUid, protectOwnRole, onSav
           </select>
         </label>
       </div>
-      {isSelf && <div style={{ color: "#8A93A0", fontSize: 12, marginTop: 12 }}>You cannot disable your own profile.{protectOwnRole ? " Owners cannot change their own role." : ""}</div>}
+      {isSelf && <div style={{ color: "#8A93A0", fontSize: 12, marginTop: 12 }}>You cannot change your own role or disable your own profile.</div>}
       {saveError && <div role="alert" style={{ color: "#d98a7c", marginTop: 12 }}>{saveError}</div>}
       <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
         <button className="hg-btn" disabled={saving || !isValidRole(role)} onClick={save} style={{ ...userButtonStyle, background: "#B8894C", color: "#14161A" }}>{saving ? "Saving…" : "Save Profile"}</button>
@@ -123,7 +142,7 @@ function AuthorizationProfileEditor({ profile, currentUid, protectOwnRole, onSav
   );
 }
 
-function AuthorizedUsers({ currentUid, protectOwnRole, requirePermission, onSave, onClose }) {
+function AuthorizedUsers({ currentUid, managerProfile, requirePermission, onSave, onClose }) {
   const [profiles, setProfiles] = useState([]);
   const [ready, setReady] = useState(false);
   const [usersError, setUsersError] = useState("");
@@ -146,6 +165,21 @@ function AuthorizedUsers({ currentUid, protectOwnRole, requirePermission, onSave
     return () => { listening = false; unsubscribe(); };
   }, [currentUid, requirePermission]);
   const editingProfile = profiles.find((p) => p.uid === editingUid);
+  useEffect(() => {
+    if (editingUid && !canManageAuthorizationProfile(managerProfile, editingProfile)) {
+      setEditingUid(null);
+      setUsersError("You are no longer authorized to edit this authorization profile, or it no longer exists.");
+    }
+  }, [editingUid, editingProfile, managerProfile]);
+  const openProfileEditor = (profile) => {
+    if (!requirePermission("canManageUsers") || !canManageAuthorizationProfile(managerProfile, profile) ||
+        (profile.role === "owner" && !requirePermission("canManageOwners"))) {
+      setUsersError("You are not authorized to edit this authorization profile.");
+      return;
+    }
+    setUsersError("");
+    setEditingUid(profile.uid);
+  };
   return (
     <div style={{ maxWidth: 1000, margin: "0 auto", padding: 24 }}>
       <button className="hg-btn" onClick={onClose} style={userButtonStyle}><ArrowLeft size={14} /> Back to list</button>
@@ -163,14 +197,14 @@ function AuthorizedUsers({ currentUid, protectOwnRole, requirePermission, onSave
                 <td style={{ padding: 12 }}>{isValidRole(profile.role) ? ROLE_LABELS[profile.role] : "Unknown role"}</td>
                 <td style={{ padding: 12 }}>{profile.territory || "—"}</td>
                 <td style={{ padding: 12, color: profile.active === true ? "#B8894C" : "#d98a7c" }}>{profile.active === true ? "Active" : "Disabled"}</td>
-                <td style={{ padding: 12 }}><button className="hg-btn" onClick={() => { if (requirePermission("canManageUsers")) setEditingUid(profile.uid); }} style={userButtonStyle}>Edit</button></td>
+                <td style={{ padding: 12 }}>{canManageAuthorizationProfile(managerProfile, profile) && <button className="hg-btn" onClick={() => openProfileEditor(profile)} style={userButtonStyle}>Edit</button>}</td>
               </tr>
             ))}</tbody>
           </table>
           {!profiles.length && !usersError && <div style={{ padding: 16, color: "#8A93A0" }}>No authorization profiles found.</div>}
         </div>
       )}
-      {editingProfile && <AuthorizationProfileEditor key={editingProfile.uid} profile={editingProfile} currentUid={currentUid} protectOwnRole={protectOwnRole} onSave={onSave} onClose={() => setEditingUid(null)} />}
+      {canManageAuthorizationProfile(managerProfile, editingProfile) && <AuthorizationProfileEditor key={editingProfile.uid} profile={editingProfile} currentUid={currentUid} managerProfile={managerProfile} onSave={onSave} onClose={() => setEditingUid(null)} />}
     </div>
   );
 }
@@ -971,14 +1005,13 @@ const openOrderFromCompare = (cigarId) => {
     if (!requirePermission("canManageUsers")) throw new Error("You are not authorized to manage users.");
     const actingUid = accessRef.current.uid;
     if (!isValidRole(changes.role) || typeof changes.territory !== "string" || typeof changes.active !== "boolean") throw new Error("Enter a valid role, territory, and status.");
+    if (!getAssignableRoles(accessRef.current.profile).includes(changes.role)) throw new Error("You are not authorized to assign this role.");
     const profileDoc = doc(db, "users", uid);
     const existing = await getDoc(profileDoc);
     if (!requirePermission("canManageUsers") || accessRef.current.uid !== actingUid) throw new Error("Your authorization changed. Reopen Authorized Users to continue.");
     if (!existing.exists()) throw new Error("This authorization profile no longer exists.");
-    if (uid === actingUid) {
-      if (changes.active !== true) throw new Error("You cannot disable your own authorization profile.");
-      if ((accessRef.current.permissions.protectOwnRole || getProfilePermissions(existing.data()).protectOwnRole) && changes.role !== "owner") throw new Error("Owners cannot change their own role.");
-    }
+    const authorizationError = authorizationUpdateError(accessRef.current.profile, actingUid, uid, existing.data(), changes);
+    if (authorizationError) throw new Error(authorizationError);
     // updateDoc cannot recreate a deleted profile and preserves identity/other fields.
     await updateDoc(profileDoc, { role: changes.role, territory: changes.territory.trim(), active: changes.active });
   };
@@ -1325,7 +1358,7 @@ const openOrderFromCompare = (cigarId) => {
       )}
 
       {showAuthorizedUsers && canManageUsers ? (
-        <AuthorizedUsers key={user.uid} currentUid={user.uid} protectOwnRole={permissions.protectOwnRole} requirePermission={requirePermission} onSave={saveAuthorizationProfile} onClose={() => { setShowAuthorizedUsers(false); setShowCompare(false); setSelectedId(null); }} />
+        <AuthorizedUsers key={user.uid} currentUid={user.uid} managerProfile={userProfile} requirePermission={requirePermission} onSave={saveAuthorizationProfile} onClose={() => { setShowAuthorizedUsers(false); setShowCompare(false); setSelectedId(null); }} />
       ) : loading ? (
         <div style={{ padding: 40, fontFamily: "'Oswald', sans-serif", color: "#8A93A0" }}>Loading manifest…</div>
     ) : showFinalReview && canUseFinalReview ? (
