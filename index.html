@@ -422,12 +422,19 @@ const EMPTY_FORM = {
   sizes: [newSizeRow()],
 };
 
-function Gauge({ value, label }) {
+function getGaugePosition(value, cx = 60, cy = 62, r = 44) {
   const v = Math.min(5, Math.max(1, Number(value) || 1));
+  const angle = Math.PI + ((v - 1) / 4) * Math.PI;
+  return {
+    value: v,
+    x: cx + r * 0.78 * Math.cos(angle),
+    y: cy + r * 0.78 * Math.sin(angle),
+  };
+}
+
+function Gauge({ value, label }) {
   const cx = 60, cy = 62, r = 44;
-  const angle = -90 + ((v - 1) / 4) * 180;
-  const nx2 = cx - r * 0.78 * Math.sin((90 - angle) * Math.PI / 180);
-  const ny2 = cy - r * 0.78 * Math.cos((90 - angle) * Math.PI / 180);
+  const { value: v, x: nx2, y: ny2 } = getGaugePosition(value, cx, cy, r);
   const ticks = [1, 2, 3, 4, 5].map((t) => {
     const ta = (-90 + ((t - 1) / 4) * 180 - 90) * Math.PI / 180;
     return {
