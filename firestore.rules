@@ -1,0 +1,153 @@
+rules_version = '2';
+
+service cloud.firestore {
+match /databases/{database}/documents {
+function signedIn() {
+  return request.auth != null;
+}
+
+function userDoc(uid) {
+  return get(/databases/$(database)/documents/users/$(uid));
+}
+
+function currentUserExists() {
+  return signedIn()
+    && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+}
+
+function currentRole() {
+  return userDoc(request.auth.uid).data.role;
+}
+
+function currentUserActive() {
+  return userDoc(request.auth.uid).data.active == true;
+}
+
+function authorized() {
+  return currentUserExists()
+    && currentUserActive()
+    && currentRole() in ['owner', 'admin', 'field_rep', 'viewer'];
+}
+
+function isOwner() {
+  return authorized()
+    && currentRole() == 'owner';
+}
+
+function isManager() {
+  return authorized()
+    && currentRole() in ['owner', 'admin'];
+}
+
+// -------------------------------
+// CIGAR CATALOG
+// -------------------------------
+
+match /cigars/{cigarId} {
+
+  // Catalog remains publicly readable.
+  allow read: if true;
+
+  // Only active Owner/Admin users can change master cigar data,
+  // pricing, sizes, or package information.
+  allow create, update, delete: if isManager();
+}
+
+// -------------------------------
+// AUTHORIZED USER PROFILES
+// -------------------------------
+
+match /users/{userId} {
+
+  // Any authenticated user may read their own authorization profile.
+  allow get: if signedIn()
+             && request.auth.uid == userId;
+
+  // Active Owner/Admin users may read the user list and profiles.
+  allow list: if isManager();
+
+  allow get: if isManager();
+
+  // Owner/Admin can update existing profiles,
+  // subject to field and self-protection rules below.
+  allow update: if isManager()
+
+    // Only these fields may exist after the update.
+    && request.resource.data.keys().hasOnly([
+      'displayName',
+      'email',
+      'role',
+      'territory',
+      'active'
+    ])
+
+    // Required profile fields must remain present.
+    && request.resource.data.keys().hasAll([
+      'displayName',
+      'email',
+      'role',
+      'territory',
+      'active'
+    ])
+
+    // Restrict role values.
+    && request.resource.data.role in [
+      'owner',
+      'admin',
+      'field_rep',
+      'viewer'
+    ]
+
+    // Basic type checks.
+    && request.resource.data.displayName is string
+    && request.resource.data.email is string
+    && request.resource.data.territory is string
+    && request.resource.data.active is bool
+
+    // Nobody can disable their own authorization profile.
+    && (
+      request.auth.uid != userId
+      || request.resource.data.active == true
+    )
+
+    // Nobody can change their own role.
+    && (
+      request.auth.uid != userId
+      || request.resource.data.role == resource.data.role
+    )
+
+    // Owners may manage other profiles, including other Owners.
+    // Admins may only manage and assign non-Owner roles.
+    && (
+      isOwner()
+      || (
+        currentRole() == 'admin'
+        && resource.data.role in ['admin', 'field_rep', 'viewer']
+        && request.resource.data.role in ['admin', 'field_rep', 'viewer']
+      )
+    );
+
+  // Authorization profile creation remains a deliberate
+  // Firebase-console/admin operation for now.
+  allow create: if false;
+
+  // Do not delete authorization profiles through the app.
+  allow delete: if false;
+}
+
+// -------------------------------
+// LEGACY DATA
+// -------------------------------
+
+match /app-data/cigars {
+  allow read: if true;
+  allow write: if false;
+}
+
+// Everything else denied.
+match /{document=**} {
+  allow read, write: if false;
+}
+
+}
+}
