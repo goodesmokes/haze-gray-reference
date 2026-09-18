@@ -144,6 +144,45 @@ match /app-data/cigars {
   allow write: if false;
 }
 
+// -------------------------------
+// IMMUTABLE SAVED ORDERS
+// -------------------------------
+function canUseOrders() {
+  return authorized() && currentRole() in ['owner', 'admin', 'field_rep'];
+}
+
+match /orders/{orderId} {
+  // A transaction must be able to check an unused ID. This reveals no order data.
+  allow get: if canUseOrders() && (!exists(/databases/$(database)/documents/orders/$(orderId))
+    || isManager() || resource.data.creatorUid == request.auth.uid);
+  allow list: if canUseOrders() && (isManager() || resource.data.creatorUid == request.auth.uid);
+  // Internal reference snapshots: line contents/pricing are supplied by the client.
+  // Validate only bounded top-level structure; never iterate all order lines here.
+  allow create: if canUseOrders()
+    && request.resource.data.keys().hasOnly(['schemaVersion', 'status', 'retailerName', 'retailerNameNormalized', 'retailerEmail', 'notes', 'creatorUid', 'creatorDisplayName', 'savedAt', 'lineItems', 'totals'])
+    && request.resource.data.keys().hasAll(['schemaVersion', 'status', 'retailerName', 'retailerNameNormalized', 'retailerEmail', 'notes', 'creatorUid', 'creatorDisplayName', 'savedAt', 'lineItems', 'totals'])
+    && request.resource.data.creatorUid == request.auth.uid
+    && request.resource.data.creatorDisplayName is string && request.resource.data.creatorDisplayName.size() <= 500
+    && request.resource.data.creatorDisplayName == userDoc(request.auth.uid).data.displayName
+    && request.resource.data.schemaVersion is int && request.resource.data.schemaVersion == 1
+    && request.resource.data.status == 'saved'
+    && request.resource.data.savedAt is timestamp && request.resource.data.savedAt == request.time
+    && request.resource.data.retailerName is string && request.resource.data.retailerName.size() <= 500
+    && request.resource.data.retailerNameNormalized is string && request.resource.data.retailerNameNormalized.size() <= 1500
+    && request.resource.data.retailerEmail is string && request.resource.data.retailerEmail.size() <= 500
+    && request.resource.data.notes is string && request.resource.data.notes.size() <= 10000
+    && request.resource.data.lineItems is list && request.resource.data.lineItems.size() > 0 && request.resource.data.lineItems.size() <= 100
+    && request.resource.data.totals is map
+    && request.resource.data.totals.keys().hasOnly(['wholesaleTotal', 'retailTotal', 'grossProfit', 'marginPct', 'totalQuantity', 'lineCount'])
+    && request.resource.data.totals.wholesaleTotal is number && request.resource.data.totals.wholesaleTotal >= 0 && request.resource.data.totals.wholesaleTotal <= 1000000000
+    && request.resource.data.totals.retailTotal is number && request.resource.data.totals.retailTotal >= 0 && request.resource.data.totals.retailTotal <= 1000000000
+    && request.resource.data.totals.grossProfit is number && request.resource.data.totals.grossProfit >= -1000000000 && request.resource.data.totals.grossProfit <= 1000000000
+    && request.resource.data.totals.marginPct is number && request.resource.data.totals.marginPct <= 100 && request.resource.data.totals.marginPct >= -1000000000000000
+    && request.resource.data.totals.totalQuantity is int && request.resource.data.totals.totalQuantity > 0 && request.resource.data.totals.totalQuantity <= 100000000
+    && request.resource.data.totals.lineCount is int && request.resource.data.totals.lineCount == request.resource.data.lineItems.size();
+  allow update, delete: if false;
+}
+
 // Everything else denied.
 match /{document=**} {
   allow read, write: if false;

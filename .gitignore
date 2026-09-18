@@ -1,0 +1,11 @@
+node_modules/
+.pnpm-store/
+.firebase/
+*-debug.log*
+.env
+.env.*
+!.env.example
+service-account.json
+service-account-key.json
+haze-gray-cigars-firebase-adminsdk-*.json
+*.local.log

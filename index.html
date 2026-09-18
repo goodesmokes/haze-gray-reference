@@ -30,7 +30,7 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import { createRoot } from "react-dom/client";
 import { Plus, X, ChevronRight, ArrowLeft, Pencil, Trash2, Search, Cigarette, Upload, Loader2, Scale, Mail, Copy, ShoppingCart, Minus } from "lucide-react";
 import { initializeApp } from "firebase/app";
-import { getFirestore, doc, getDoc, setDoc, updateDoc, deleteDoc, collection, onSnapshot, getDocs } from "firebase/firestore";
+import { getFirestore, doc, getDoc, setDoc, updateDoc, deleteDoc, collection, onSnapshot, getDocs, query, where, orderBy, runTransaction, serverTimestamp } from "firebase/firestore";
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from "firebase/auth";
 
 const firebaseConfig = {
@@ -627,6 +627,270 @@ function loadOrderDraft() {
   }
 }
 
+
+const normalizeRetailerName = (name) => name.trim().toLowerCase();
+const orderMoney = (value) => Number.isFinite(value) ? `$${value.toFixed(2)}` : "Not recorded";
+const savedOrderDate = (value) => value?.toDate ? value.toDate().toLocaleString() : "Date unavailable";
+const nonnegativeMoney = (value) => Number.isFinite(value) && value >= 0 && value <= 1000000000;
+
+function isReadableSavedOrder(order) {
+  // Rules deliberately do not validate every line. Do not render arbitrary objects as React children.
+  return order && ["retailerName", "retailerNameNormalized", "retailerEmail", "notes", "creatorDisplayName"]
+    .every((key) => order[key] == null || typeof order[key] === "string") &&
+    Array.isArray(order.lineItems) && order.lineItems.length > 0 && order.lineItems.length <= 100 &&
+    order.lineItems.every((line) => line &&
+      ["cigarId", "sizeKey", "packKey", "cigarName", "vitola", "dims", "packLabel"].every((key) => typeof line[key] === "string") &&
+      Number.isSafeInteger(line.qty) && line.qty > 0 && nonnegativeMoney(line.unitPrice) && nonnegativeMoney(line.wholesaleTotal)) &&
+    order.totals && ["wholesaleTotal", "retailTotal", "grossProfit", "marginPct", "totalQuantity", "lineCount"]
+      .every((key) => Number.isFinite(order.totals[key]));
+}
+
+function buildSavedOrder(draft, user, profile) {
+  if (!Array.isArray(draft.orderItems) || !draft.orderItems.length || draft.orderItems.length > 100) throw new Error("Save between 1 and 100 order lines.");
+  if (![draft.orderRetailer, draft.orderEmail, draft.orderNotes].every((v) => typeof v === "string")) throw new Error("Invalid retailer or order information.");
+  if (typeof profile.displayName !== "string" || profile.displayName.length > 500) throw new Error("Your authorization profile needs a valid display name.");
+  const seen = new Set();
+  const lineItems = draft.orderItems.map((line) => {
+    // Existing drafts encode sizeKey in lineKey. Preserve that format; new records store it explicitly.
+    if (!line || typeof line.lineKey !== "string") throw new Error("Invalid order line.");
+    const prefix = `${line.cigarId}__`, suffix = `__${line.packKey}`;
+    const sizeKey = line.sizeKey || (line.lineKey.startsWith(prefix) && line.lineKey.endsWith(suffix) ? line.lineKey.slice(prefix.length, -suffix.length) : "");
+    if (typeof sizeKey !== "string" || !sizeKey || sizeKey.length > 500 || typeof line.cigarId !== "string" || !line.cigarId || line.cigarId.includes("/") || line.lineKey !== `${line.cigarId}__${sizeKey}__${line.packKey}` || seen.has(line.lineKey) || !["single", "box10", "box20", "bundle20"].includes(line.packKey) ||
+        ![line.lineKey, line.cigarId, line.cigarName, line.vitola, line.dims, line.packLabel].every((v) => typeof v === "string" && v.length <= 500) ||
+        !Number.isSafeInteger(line.qty) || line.qty < 1 || line.qty > 1000000 || !nonnegativeMoney(line.unitPrice) ||
+        !(line.retailUnitValue === null || nonnegativeMoney(line.retailUnitValue))) throw new Error("The active order contains an invalid line. Review quantities and prices before saving.");
+    seen.add(line.lineKey);
+    const wholesaleTotal = line.unitPrice * line.qty;
+    const retailTotal = (line.retailUnitValue ?? 0) * line.qty;
+    if (!nonnegativeMoney(wholesaleTotal) || !nonnegativeMoney(retailTotal)) throw new Error("An order line exceeds the supported amount.");
+    return { lineKey: line.lineKey, cigarId: line.cigarId, cigarName: line.cigarName, sizeKey, vitola: line.vitola, dims: line.dims,
+      packKey: line.packKey, packLabel: line.packLabel, unitPrice: line.unitPrice, retailUnitValue: line.retailUnitValue, qty: line.qty,
+      wholesaleTotal, retailTotal, grossProfit: retailTotal - wholesaleTotal };
+  });
+  const wholesaleTotal = lineItems.reduce((sum, line) => sum + line.wholesaleTotal, 0);
+  const retailTotal = lineItems.reduce((sum, line) => sum + line.retailTotal, 0);
+  if (!nonnegativeMoney(wholesaleTotal) || !nonnegativeMoney(retailTotal)) throw new Error("The order exceeds the supported total.");
+  if (draft.orderRetailer.length > 500 || draft.orderEmail.length > 500 || draft.orderNotes.length > 10000) throw new Error("Retailer/email must be at most 500 characters and notes at most 10,000.");
+  const snapshot = { schemaVersion: 1, status: "saved", retailerName: draft.orderRetailer, retailerNameNormalized: normalizeRetailerName(draft.orderRetailer),
+    retailerEmail: draft.orderEmail, notes: draft.orderNotes, creatorUid: user.uid, creatorDisplayName: profile.displayName || "", lineItems,
+    totals: { wholesaleTotal, retailTotal, grossProfit: retailTotal - wholesaleTotal, marginPct: retailTotal > 0 ? ((retailTotal - wholesaleTotal) / retailTotal) * 100 : 0,
+      totalQuantity: lineItems.reduce((sum, line) => sum + line.qty, 0), lineCount: lineItems.length } };
+  if (new TextEncoder().encode(JSON.stringify(snapshot)).length > 900000) throw new Error("Order snapshot exceeds the supported document size.");
+  return snapshot;
+}
+
+function buildReorderPlan(order, cigars, packOptions, activeItems) {
+  const available = [], unavailable = [];
+  for (const historical of order.lineItems || []) {
+    const cigar = cigars.find((item) => item.id === historical.cigarId);
+    const size = cigar?.sizes?.find((item) => item.key === historical.sizeKey);
+    const pack = packOptions.find((item) => item.key === historical.packKey);
+    const price = size && pack ? (pack.key === "single" ? getSinglePrice(size, "box") : getNumericPrice(size, pack.key)) : null;
+    if (!cigar || !size || !pack || !nonnegativeMoney(price) || !Number.isSafeInteger(historical.qty) || historical.qty < 1) {
+      unavailable.push({ ...historical, reason: !cigar ? "Product unavailable" : !size ? "Size unavailable" : !pack ? "Package unavailable" : "Current price or quantity unavailable" });
+      continue;
+    }
+    const msrp = getNumericPrice(size, "msrp");
+    const count = pack.key === "single" ? 1 : pack.key === "box10" ? 10 : 20;
+    const lineKey = `${cigar.id}__${size.key}__${pack.key}`;
+    const existing = activeItems.find((line) => line.lineKey === lineKey);
+    available.push({ historicalPrice: historical.unitPrice, activePrice: existing?.unitPrice,
+      line: { lineKey, cigarId: cigar.id, cigarName: cigar.name, vitola: size.vitola, dims: size.dims, packKey: pack.key, packLabel: pack.label,
+        unitPrice: price, retailUnitValue: nonnegativeMoney(msrp) ? msrp * count : null, qty: historical.qty } });
+  }
+  return { available, unavailable };
+}
+
+function mergeReorderItems(activeItems, newItems) {
+  const merged = activeItems.map((line) => ({ ...line }));
+  for (const line of newItems) {
+    const index = merged.findIndex((item) => item.lineKey === line.lineKey);
+    const qty = line.qty + (index >= 0 ? merged[index].qty : 0);
+    if (!Number.isSafeInteger(qty) || qty < 1) throw new Error("Combined quantity is too large.");
+    if (index >= 0) merged[index] = { ...line, qty };
+    else merged.push({ ...line });
+  }
+  return merged;
+}
+
+async function savePendingOrder(pending, uid, permitted, cigars, packOptions) {
+  if (!permitted() || auth.currentUser?.uid !== uid) throw new Error("You are not authorized to save orders.");
+  if (pending?.uid !== uid || typeof pending.id !== "string" || !/^[a-zA-Z0-9]{20}$/.test(pending.id)) throw new Error("Invalid pending save identity.");
+  return runTransaction(db, async (transaction) => {
+    const ref = doc(db, "orders", pending.id);
+    const existing = await transaction.get(ref);
+    if (!permitted() || auth.currentUser?.uid !== uid) throw new Error("Your order access changed.");
+    if (existing.exists()) {
+      if (existing.data().creatorUid !== uid) throw new Error("This order ID belongs to another account.");
+      return; // Confirm a prior save without rewriting it, even if the catalog has changed.
+    }
+    const profileDoc = await transaction.get(doc(db, "users", uid));
+    const currentProfile = profileDoc.exists() ? profileDoc.data() : null;
+    if (!getProfilePermissions(currentProfile).canUseFinalReview) throw new Error("Your account is not authorized to save orders.");
+    const payload = pending.payload;
+    if (payload?.creatorUid !== uid || payload.schemaVersion !== 1 || payload.status !== "saved") throw new Error("Invalid pending order snapshot.");
+    const snapshot = buildSavedOrder({ orderItems: payload.lineItems, orderRetailer: payload.retailerName, orderEmail: payload.retailerEmail, orderNotes: payload.notes }, { uid }, currentProfile);
+    const plan = buildReorderPlan(snapshot, cigars, packOptions, []);
+    if (plan.unavailable.length) throw new Error("A captured product, size or package is no longer available. Restore that configuration before retrying this captured save.");
+    if (!permitted() || auth.currentUser?.uid !== uid) throw new Error("Your order access changed.");
+    transaction.set(ref, { ...snapshot, savedAt: serverTimestamp() });
+  });
+}
+
+function SaveOrderPanel({ draft, user, profile, cigars, packOptions, requirePermission, onContinue, onStartNew }) {
+  const storageKey = `haze-gray-cigars.pending-order-save.v1.${user.uid}`;
+  const [attempt, setAttempt] = useState(() => {
+    try { const value = JSON.parse(localStorage.getItem(storageKey)); return value?.uid === user.uid && typeof value.id === "string" && value.payload ? value : null; } catch { return null; }
+  });
+  const attemptRef = useRef(attempt);
+  const busy = useRef(false);
+  const mounted = useRef(true);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [message, setMessage] = useState("");
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  const permitted = () => auth.currentUser?.uid === user.uid && requirePermission("canUseFinalReview");
+  const save = async (useCurrentDraft = false) => {
+    if (busy.current || saved || !permitted()) return;
+    busy.current = true; setSaving(true); setMessage("");
+    try {
+      let pending = attemptRef.current;
+      if (!pending) {
+        pending = { uid: user.uid, id: doc(collection(db, "orders")).id, payload: buildSavedOrder(draft, user, profile) };
+        // Persist before any network write so reloads and uncertain retries keep the same ID/payload.
+        localStorage.setItem(storageKey, JSON.stringify(pending));
+        attemptRef.current = pending; setAttempt(pending);
+      }
+      if (useCurrentDraft) {
+        pending = { ...pending, payload: buildSavedOrder(draft, user, profile) };
+        localStorage.setItem(storageKey, JSON.stringify(pending));
+        attemptRef.current = pending; setAttempt(pending);
+      }
+      await savePendingOrder(pending, user.uid, permitted, cigars, packOptions);
+      if (mounted.current && permitted()) { setSaved(true); setMessage("This order has been recorded in Order History. Your active draft has not been cleared."); }
+    } catch (e) {
+      if (mounted.current && permitted()) {
+        setMessage(`Save could not be confirmed: ${e.message} Retry checks the same order ID. Your draft is unchanged.`);
+      }
+    } finally { busy.current = false; if (mounted.current) setSaving(false); }
+  };
+  let priceCheck = null;
+  try { priceCheck = buildReorderPlan(attempt?.payload || buildSavedOrder(draft, user, profile), cigars, packOptions, []); } catch { /* Save reports invalid draft details. */ }
+  const priceChanges = priceCheck?.available.filter((item) => item.historicalPrice !== item.line.unitPrice) || [];
+  const finish = (startNew) => {
+    if (!permitted()) return;
+    try { localStorage.removeItem(storageKey); } catch (e) { setMessage("Could not clear the save receipt. Retry before starting another save."); return; }
+    attemptRef.current = null; setAttempt(null); setSaved(false);
+    if (startNew) onStartNew(); else onContinue();
+  };
+  return <div style={{ border: "1px solid #3B2A1E", borderRadius: 8, padding: 16, marginBottom: 20 }}>
+    <div style={{ fontFamily: "'Oswald', sans-serif", color: "#8A93A0", fontSize: 13, marginBottom: 10 }}>Save an internal reference record using the captured draft prices. Prices and totals are not independently server-verified. This does not send email, submit, fulfill, or collect payment.</div>
+    {!saved && <p style={{ color: "#B8894C", fontSize: 13 }}>Before saving, review draft prices against the current catalog. Saving preserves the captured prices; a reorder uses current prices. Unavailable configurations cannot be saved as a new record.</p>}
+    {attempt && !saved && <p style={{ color: "#B8894C", fontSize: 13 }}>Pending save {attempt.id}: {attempt.payload.retailerName || "Retailer not recorded"} · {orderMoney(attempt.payload.totals?.wholesaleTotal)}. Retry uses that captured order, even if you have since edited the draft.</p>}
+    {!saved && <button className="hg-btn" onClick={() => save()} disabled={saving || (!attempt && !draft.orderItems.length)} style={userButtonStyle}>{saving ? "Saving…" : attempt ? "Check / Retry Saved Order" : "Save to Order History"}</button>}
+    {!saved && priceChanges.length > 0 && <p style={{ color: "#B8894C", fontSize: 13 }}>Current catalog differs: {priceChanges.map((item) => item.line.cigarName + " / " + item.line.vitola + " / " + item.line.packLabel + ": captured " + orderMoney(item.historicalPrice) + ", current " + orderMoney(item.line.unitPrice)).join("; ")}. Save records the captured prices shown above.</p>}
+    {attempt && !saved && <div style={{ marginTop: 10 }}><button className="hg-btn" style={userButtonStyle} disabled={saving || !draft.orderItems.length} onClick={() => save(true)}>Retry This ID With Current Draft</button><p style={{ color: "#8A93A0", fontSize: 12 }}>Use this only to replace a rejected captured attempt. Any record already saved under this ID remains unchanged.</p></div>}
+    {message && <p role="status" style={{ color: saved ? "#B8894C" : "#d98a7c", fontSize: 13 }}>{message}</p>}
+    {saved && <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+      <button className="hg-btn" onClick={() => finish(false)} style={userButtonStyle}>Continue Editing Current Order</button>
+      <button className="hg-btn" onClick={() => finish(true)} style={userButtonStyle}>Start New Order (clear current draft)</button>
+    </div>}
+  </div>;
+}
+
+function OrderHistory({ user, profile, cigars, packOptions, draft, requirePermission, onApplyReorder, onClose }) {
+  const [orders, setOrders] = useState([]);
+  const [ready, setReady] = useState(false);
+  const [historyError, setHistoryError] = useState("");
+  const [search, setSearch] = useState("");
+  const [selectedOrderId, setSelectedOrderId] = useState(null);
+  const [review, setReview] = useState(false);
+  const [acknowledged, setAcknowledged] = useState(false);
+  const [retry, setRetry] = useState(0);
+  const allOrders = getProfilePermissions(profile).canManageUsers;
+  useEffect(() => {
+    if (!requirePermission("canUseOrderBuilder")) return;
+    let active = true;
+    setOrders([]); setReady(false); setSelectedOrderId(null); setReview(false); setHistoryError("");
+    const scope = allOrders ? query(collection(db, "orders"), orderBy("savedAt", "desc")) : query(collection(db, "orders"), where("creatorUid", "==", user.uid), orderBy("savedAt", "desc"));
+    const stop = onSnapshot(scope, (snap) => {
+      if (!active) return;
+      const records = snap.docs.filter((item) => !item.metadata.hasPendingWrites && (allOrders || item.data().creatorUid === user.uid)).map((item) => ({ ...item.data(), id: item.id }));
+      const readable = records.filter(isReadableSavedOrder);
+      setOrders(readable);
+      setHistoryError(readable.length < records.length ? "Some saved records contain malformed data and cannot be displayed. The stored records have not been changed." : "");
+      setReady(true);
+    }, (e) => {
+      if (!active) return;
+      setOrders([]); setSelectedOrderId(null); setReview(false); setReady(true);
+      setHistoryError(`Could not load order history: ${e.message}`);
+    });
+    return () => { active = false; stop(); };
+  }, [user.uid, allOrders, retry, requirePermission]);
+  const selected = orders.find((order) => order.id === selectedOrderId);
+  const filtered = orders.filter((order) => (order.retailerNameNormalized || normalizeRetailerName(order.retailerName || "")).includes(normalizeRetailerName(search)));
+  const plan = selected ? buildReorderPlan(selected, cigars, packOptions, draft.orderItems) : { available: [], unavailable: [] };
+  const planSignature = JSON.stringify(plan);
+  useEffect(() => { setAcknowledged(false); }, [planSignature]);
+  const hasDraft = draft.orderItems.length > 0 || [draft.orderRetailer, draft.orderEmail, draft.orderNotes].some((value) => value.trim());
+  const apply = (mode) => {
+    if (!requirePermission("canUseOrderBuilder") || !selected) return;
+    if (!plan.available.length || (plan.unavailable.length && !acknowledged)) { setHistoryError("Review and acknowledge unavailable items before continuing."); return; }
+    try { onApplyReorder(selected, plan, mode); } catch (e) { setHistoryError(e.message); }
+  };
+  return <div style={{ maxWidth: 1000, margin: "0 auto", padding: 24 }}>
+    <button className="hg-btn" style={userButtonStyle} onClick={selected ? () => { setSelectedOrderId(null); setReview(false); } : onClose}><ArrowLeft size={14} /> {selected ? "Back to History" : "Back to list"}</button>
+    <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 32, marginTop: 16 }}>Order History</div>
+    {historyError && <div role="alert" style={{ color: "#d98a7c", margin: "12px 0" }}>{historyError} <button className="hg-btn" style={userButtonStyle} onClick={() => setRetry((value) => value + 1)}>Reload history</button></div>}
+    {!selected ? <>
+      <input aria-label="Search retailer history" placeholder="Search retailer name…" value={search} onChange={(e) => setSearch(e.target.value)} style={{ ...userFieldStyle, margin: "12px 0" }} />
+      {!ready ? <p>Loading saved orders…</p> : !orders.length ? <p>No saved orders yet.</p> : !filtered.length ? <p>No orders match this retailer search.</p> : <>
+        <p style={{ color: "#8A93A0", fontSize: 13 }}>{filtered.length} saved orders · Most recent: {savedOrderDate(filtered[0].savedAt)}</p>
+        {filtered.map((order) => <button key={order.id} className="hg-btn" onClick={() => { if (requirePermission("canUseOrderBuilder")) setSelectedOrderId(order.id); }} style={{ ...userButtonStyle, width: "100%", textAlign: "left", display: "block", marginBottom: 10, padding: 16 }}>
+          <strong>{order.retailerName || "Retailer not recorded"}</strong> · {orderMoney(order.totals?.wholesaleTotal)}
+          <div style={{ marginTop: 6, color: "#8A93A0" }}>{savedOrderDate(order.savedAt)} · {order.totals?.totalQuantity ?? "—"} total quantity · {order.lineItems?.length ?? "—"} lines{order.creatorDisplayName ? ` · ${order.creatorDisplayName}` : ""}</div>
+        </button>)}
+      </>}
+    </> : <>
+      <h2 style={{ fontFamily: "'Oswald', sans-serif" }}>{selected.retailerName || "Retailer not recorded"}</h2>
+      <p>{savedOrderDate(selected.savedAt)}{selected.creatorDisplayName ? ` · ${selected.creatorDisplayName}` : ""}</p>
+      <p style={{ color: "#8A93A0", overflowWrap: "anywhere" }}>Order {selected.id}</p>
+      {selected.retailerEmail && <p>{selected.retailerEmail}</p>}
+      {selected.notes && <p style={{ whiteSpace: "pre-wrap" }}>{selected.notes}</p>}
+      {(selected.lineItems || []).map((line, index) => <div key={index} style={{ border: "1px solid #3B2A1E", borderRadius: 6, padding: 14, marginBottom: 10 }}>
+        <strong>{line.cigarName || "Product not recorded"}</strong> · {line.vitola} {line.dims} · {line.packLabel}
+        <div style={{ marginTop: 8 }}>{line.qty} × {orderMoney(line.unitPrice)} · Historical line total: {orderMoney(line.wholesaleTotal)}</div>
+      </div>)}
+      <p>Historical order total: <strong>{orderMoney(selected.totals?.wholesaleTotal)}</strong></p>
+      <p style={{ color: "#8A93A0" }}>Retail value: {orderMoney(selected.totals?.retailTotal)} · Gross profit: {orderMoney(selected.totals?.grossProfit)} · Margin: {Number.isFinite(selected.totals?.marginPct) ? `${selected.totals.marginPct.toFixed(1)}%` : "Not recorded"}</p>
+      <button className="hg-btn" style={userButtonStyle} onClick={() => { if (requirePermission("canUseOrderBuilder")) { setReview(true); setAcknowledged(false); } }}>Start New Order From This</button>
+      {review && <div role="dialog" aria-modal="true" aria-label="Review reorder" style={{ position: "fixed", inset: 0, zIndex: 65, background: "rgba(0,0,0,0.65)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+        <div className="hg-scroll" style={{ background: "#1c1f24", border: "1px solid #B8894C", borderRadius: 8, padding: 20, width: "100%", maxWidth: 640, maxHeight: "85vh", overflowY: "auto" }}>
+          <h2 style={{ fontFamily: "'Bebas Neue', sans-serif" }}>Review Reorder</h2>
+          {historyError && <p role="alert" style={{ color: "#d98a7c" }}>{historyError}</p>}
+          <p>New order items use current prices. The historical order remains unchanged.</p>
+          {plan.available.map(({ line, historicalPrice, activePrice }, index) => <div key={index} style={{ borderBottom: "1px solid #454b53", padding: "10px 0" }}>
+            {line.cigarName} · {line.vitola} · {line.packLabel} × {line.qty}
+            <div>Historical: {orderMoney(historicalPrice)} → Current: {orderMoney(line.unitPrice)}</div>
+            {activePrice !== undefined && <div style={{ color: "#B8894C" }}>Matching active line: {orderMoney(activePrice)} → {orderMoney(line.unitPrice)}. Add mode combines quantities and reprices the combined line.</div>}
+          </div>)}
+          {plan.unavailable.length > 0 && <div style={{ color: "#d98a7c", marginTop: 14 }}>
+            {plan.unavailable.map((line, index) => <p key={index}>{line.cigarName} · {line.vitola} · {line.packLabel}: {line.reason}</p>)}
+            <label><input type="checkbox" checked={acknowledged} onChange={(e) => setAcknowledged(e.target.checked)} /> I understand these items will not be added.</label>
+          </div>}
+          {hasDraft && <p>Replace copies the saved retailer, email, notes and available items into your draft. Add keeps your current retailer, email and notes; only matching lines are repriced. Unrelated lines stay unchanged.</p>}
+          {!plan.available.length && <p>No configurations are currently available to reorder.</p>}
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 16 }}>
+            <button className="hg-btn" style={userButtonStyle} disabled={!plan.available.length || (plan.unavailable.length > 0 && !acknowledged)} onClick={() => apply("replace")}>{hasDraft ? "Replace Current Order" : "Create Active Order"}</button>
+            {hasDraft && <button className="hg-btn" style={userButtonStyle} disabled={!plan.available.length || (plan.unavailable.length > 0 && !acknowledged)} onClick={() => apply("add")}>Add Items to Current Order</button>}
+            <button className="hg-btn" style={userButtonStyle} onClick={() => setReview(false)}>Cancel</button>
+          </div>
+        </div>
+      </div>}
+    </>}
+  </div>;
+}
+
 function DetailOrderControls({ cigar, packOptions, orderItems, onAdd, onViewOrder }) {
   const [expanded, setExpanded] = useState(false);
   const [sizeKey, setSizeKey] = useState("");
@@ -733,6 +997,7 @@ function HazeGrayReference() {
   const [compareOrderId, setCompareOrderId] = useState(null);
   const [showOrderBuilder, setShowOrderBuilder] = useState(false);
   const [showFinalReview, setShowFinalReview] = useState(false);
+  const [showOrderHistory, setShowOrderHistory] = useState(false);
   const [initialOrderDraft] = useState(loadOrderDraft);
   const [orderItems, setOrderItems] = useState(initialOrderDraft.orderItems || []);
   const [orderRetailer, setOrderRetailer] = useState(initialOrderDraft.orderRetailer || "");
@@ -1034,6 +1299,8 @@ const openOrderFromCompare = (cigarId) => {
   const isAuthorizedUser = Boolean(user && profileReady && isActiveProfile(userProfile));
   const permissions = isAuthorizedUser ? getProfilePermissions(userProfile) : NO_PERMISSIONS;
   const { canEditCatalog, canEditPackages, canUseOrderBuilder, canUseFinalReview, canManageUsers, canMigrateLegacyData } = permissions;
+  const activeDraft = { orderItems, orderRetailer, orderEmail, orderNotes };
+  useEffect(() => { if (!canUseOrderBuilder) setShowOrderHistory(false); }, [canUseOrderBuilder, user?.uid]);
   // Read current access inside handlers, including async continuations and stale callbacks.
   const requirePermission = useCallback((permission) => {
     const access = accessRef.current;
@@ -1089,6 +1356,7 @@ const openOrderFromCompare = (cigarId) => {
 
   const openOrderBuilder = () => {
     if (!requirePermission("canUseOrderBuilder")) return;
+    setShowOrderHistory(false);
     setShowAuthorizedUsers(false);
     setShowFinalReview(false);
     setShowOrderBuilder(true);
@@ -1099,9 +1367,26 @@ const openOrderFromCompare = (cigarId) => {
   };
   const openAuthorizedUsers = () => {
     if (!requirePermission("canManageUsers")) return;
+    setShowOrderHistory(false);
     setShowOrderBuilder(false);
     setShowFinalReview(false);
     setShowAuthorizedUsers(true);
+  };
+  const openOrderHistory = () => {
+    if (!requirePermission("canUseOrderBuilder")) return;
+    setShowAuthorizedUsers(false); setShowFinalReview(false); setShowOrderBuilder(false); setShowOrderHistory(true);
+  };
+  const applyReorder = (order, reviewedPlan, mode) => {
+    if (!requirePermission("canUseOrderBuilder")) return;
+    const access = accessRef.current;
+    if (access.uid !== user.uid || (!access.permissions.canManageUsers && order.creatorUid !== access.uid)) throw new Error("You are not authorized to reorder this order.");
+    const currentPlan = buildReorderPlan(order, cigars, PACK_OPTIONS, orderItems);
+    if (JSON.stringify(currentPlan) !== JSON.stringify(reviewedPlan)) throw new Error("Catalog or draft changed. Review the updated prices before confirming again.");
+    if (!["replace", "add"].includes(mode) || !currentPlan.available.length) throw new Error("No valid reorder selection.");
+    const next = mergeReorderItems(mode === "add" ? orderItems : [], currentPlan.available.map((item) => item.line));
+    setOrderItems(next);
+    if (mode === "replace") { setOrderRetailer(order.retailerName || ""); setOrderEmail(order.retailerEmail || ""); setOrderNotes(order.notes || ""); }
+    openOrderBuilder();
   };
   const saveAuthorizationProfile = async (uid, changes) => {
     if (!requirePermission("canManageUsers")) throw new Error("You are not authorized to manage users.");
@@ -1416,6 +1701,7 @@ const openOrderFromCompare = (cigarId) => {
               }}>
                 <ShoppingCart size={15} /> Order Builder{orderItems.length > 0 ? ` (${orderItems.length})` : ""}
               </button>}
+              {canUseOrderBuilder && <button className="hg-btn" onClick={openOrderHistory} style={userButtonStyle}>Order History</button>}
               {canEditCatalog && <button className="hg-btn" onClick={openAdd} style={{
                 display: "flex", alignItems: "center", gap: 8, background: "#B8894C", color: "#14161A",
                 border: "none", borderRadius: 4, padding: "10px 16px", fontFamily: "'Oswald', sans-serif",
@@ -1459,7 +1745,9 @@ const openOrderFromCompare = (cigarId) => {
         </div>
       )}
 
-      {showAuthorizedUsers && canManageUsers ? (
+      {showOrderHistory && canUseOrderBuilder ? (
+        <OrderHistory key={`${user.uid}:${userProfile.role}`} user={user} profile={userProfile} cigars={cigars} packOptions={PACK_OPTIONS} draft={activeDraft} requirePermission={requirePermission} onApplyReorder={applyReorder} onClose={() => { setShowOrderHistory(false); setShowCompare(false); setSelectedId(null); }} />
+      ) : showAuthorizedUsers && canManageUsers ? (
         <AuthorizedUsers key={user.uid} currentUid={user.uid} managerProfile={userProfile} requirePermission={requirePermission} onSave={saveAuthorizationProfile} onClose={() => { setShowAuthorizedUsers(false); setShowCompare(false); setSelectedId(null); }} />
       ) : loading ? (
         <div style={{ padding: 40, fontFamily: "'Oswald', sans-serif", color: "#8A93A0" }}>Loading manifest…</div>
@@ -1705,6 +1993,7 @@ const openOrderFromCompare = (cigarId) => {
     </div>
   </div>
 )}
+<SaveOrderPanel key={`${user.uid}:${userProfile.role}`} draft={activeDraft} user={user} profile={userProfile} cigars={cigars} packOptions={PACK_OPTIONS} requirePermission={requirePermission} onContinue={openOrderBuilder} onStartNew={() => { clearOrder(); openOrderBuilder(); }} />
 <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
   <button
     className="hg-btn"

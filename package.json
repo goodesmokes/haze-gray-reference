@@ -1,0 +1,12 @@
+{
+  "name": "haze-gray-reference-tests",
+  "private": true,
+  "scripts": {
+    "test": "node --test --test-concurrency=1 tests/*.test.js"
+  },
+  "devDependencies": {
+    "@babel/parser": "^7.28.0",
+    "@babel/traverse": "^7.28.0",
+    "firebase": "10.12.2"
+  }
+}
