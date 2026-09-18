@@ -51,12 +51,12 @@ const ROLE_LABELS = Object.freeze({ owner: "Owner", admin: "Admin", field_rep: "
 const NO_PERMISSIONS = Object.freeze({
   canEditCatalog: false, canEditPackages: false, canUseOrderBuilder: false,
   canUseFinalReview: false, canManageUsers: false, canMigrateLegacyData: false,
-  canManageOwners: false,
+  canManageOwners: false, canUseRetailers: false, canChangeRetailerStatus: false,
 });
 const ROLE_PERMISSIONS = Object.freeze({
-  owner: Object.freeze({ ...NO_PERMISSIONS, canEditCatalog: true, canEditPackages: true, canUseOrderBuilder: true, canUseFinalReview: true, canManageUsers: true, canMigrateLegacyData: true, canManageOwners: true }),
-  admin: Object.freeze({ ...NO_PERMISSIONS, canEditCatalog: true, canEditPackages: true, canUseOrderBuilder: true, canUseFinalReview: true, canManageUsers: true }),
-  field_rep: Object.freeze({ ...NO_PERMISSIONS, canUseOrderBuilder: true, canUseFinalReview: true }),
+  owner: Object.freeze({ ...NO_PERMISSIONS, canEditCatalog: true, canEditPackages: true, canUseOrderBuilder: true, canUseFinalReview: true, canManageUsers: true, canUseRetailers: true, canChangeRetailerStatus: true, canMigrateLegacyData: true, canManageOwners: true }),
+  admin: Object.freeze({ ...NO_PERMISSIONS, canEditCatalog: true, canEditPackages: true, canUseOrderBuilder: true, canUseFinalReview: true, canManageUsers: true, canUseRetailers: true, canChangeRetailerStatus: true }),
+  field_rep: Object.freeze({ ...NO_PERMISSIONS, canUseOrderBuilder: true, canUseFinalReview: true, canUseRetailers: true }),
   viewer: NO_PERMISSIONS,
 });
 const isValidRole = (role) => typeof role === "string" && Object.prototype.hasOwnProperty.call(ROLE_PERMISSIONS, role);
@@ -619,6 +619,7 @@ function loadOrderDraft(uid) {
       : [];
     return {
       orderItems,
+      retailerId: validRetailerId(draft.retailerId) ? draft.retailerId : "",
       orderRetailer: typeof draft.orderRetailer === "string" ? draft.orderRetailer : "",
       orderEmail: typeof draft.orderEmail === "string" ? draft.orderEmail : "",
       orderNotes: typeof draft.orderNotes === "string" ? draft.orderNotes : "",
@@ -673,7 +674,8 @@ function buildSavedOrder(draft, user, profile) {
   const retailTotal = lineItems.reduce((sum, line) => sum + line.retailTotal, 0);
   if (!nonnegativeMoney(wholesaleTotal) || !nonnegativeMoney(retailTotal)) throw new Error("The order exceeds the supported total.");
   if (draft.orderRetailer.length > 500 || draft.orderEmail.length > 500 || draft.orderNotes.length > 10000) throw new Error("Retailer/email must be at most 500 characters and notes at most 10,000.");
-  const snapshot = { schemaVersion: 1, status: "saved", retailerName: draft.orderRetailer, retailerNameNormalized: normalizeRetailerName(draft.orderRetailer),
+  if (draft.retailerId != null && draft.retailerId !== "" && !validRetailerId(draft.retailerId)) throw new Error("Invalid retailer link.");
+  const snapshot = { ...(draft.retailerId ? { retailerId: draft.retailerId } : {}), schemaVersion: 1, status: "saved", retailerName: draft.orderRetailer, retailerNameNormalized: normalizeRetailerName(draft.orderRetailer),
     retailerEmail: draft.orderEmail, notes: draft.orderNotes, creatorUid: user.uid, creatorDisplayName: profile.displayName || "", lineItems,
     totals: { wholesaleTotal, retailTotal, grossProfit: retailTotal - wholesaleTotal, marginPct: retailTotal > 0 ? ((retailTotal - wholesaleTotal) / retailTotal) * 100 : 0,
       totalQuantity: lineItems.reduce((sum, line) => sum + line.qty, 0), lineCount: lineItems.length } };
@@ -731,7 +733,7 @@ async function savePendingOrder(pending, uid, permitted, cigars, packOptions) {
     if (!getProfilePermissions(currentProfile).canUseFinalReview) throw new Error("Your account is not authorized to save orders.");
     const payload = pending.payload;
     if (payload?.creatorUid !== uid || payload.schemaVersion !== 1 || payload.status !== "saved") throw new Error("Invalid pending order snapshot.");
-    const snapshot = buildSavedOrder({ orderItems: payload.lineItems, orderRetailer: payload.retailerName, orderEmail: payload.retailerEmail, orderNotes: payload.notes }, { uid }, currentProfile);
+    const snapshot = buildSavedOrder({ orderItems: payload.lineItems, orderRetailer: payload.retailerName, orderEmail: payload.retailerEmail, orderNotes: payload.notes, retailerId: payload.retailerId }, { uid }, currentProfile);
     const plan = buildReorderPlan(snapshot, cigars, packOptions, []);
     if (plan.unavailable.length) throw new Error("A captured product, size or package is no longer available. Restore that configuration before retrying this captured save.");
     if (!permitted() || auth.currentUser?.uid !== uid) throw new Error("Your order access changed.");
@@ -800,7 +802,7 @@ function SaveOrderPanel({ draft, user, profile, cigars, packOptions, requirePerm
   </div>;
 }
 
-function OrderHistory({ user, profile, cigars, packOptions, draft, requirePermission, onApplyReorder, onClose }) {
+function OrderHistory({ user, profile, cigars, packOptions, draft, requirePermission, onApplyReorder, onClose, retailerFilter = null, onOpenRetailer }) {
   const [orders, setOrders] = useState([]);
   const [ready, setReady] = useState(false);
   const [historyError, setHistoryError] = useState("");
@@ -830,7 +832,7 @@ function OrderHistory({ user, profile, cigars, packOptions, draft, requirePermis
     return () => { active = false; stop(); };
   }, [user.uid, allOrders, retry, requirePermission]);
   const selected = orders.find((order) => order.id === selectedOrderId);
-  const filtered = orders.filter((order) => (order.retailerNameNormalized || normalizeRetailerName(order.retailerName || "")).includes(normalizeRetailerName(search)));
+  const filtered = orders.filter((order) => (!retailerFilter || order.retailerId === retailerFilter) && (order.retailerNameNormalized || normalizeRetailerName(order.retailerName || "")).includes(normalizeRetailerName(search)));
   const plan = selected ? buildReorderPlan(selected, cigars, packOptions, draft.orderItems) : { available: [], unavailable: [] };
   const planSignature = JSON.stringify(plan);
   useEffect(() => { setAcknowledged(false); }, [planSignature]);
@@ -844,6 +846,7 @@ function OrderHistory({ user, profile, cigars, packOptions, draft, requirePermis
     <button className="hg-btn" style={userButtonStyle} onClick={selected ? () => { setSelectedOrderId(null); setReview(false); } : onClose}><ArrowLeft size={14} /> {selected ? "Back to History" : "Back to list"}</button>
     <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 32, marginTop: 16 }}>Order History</div>
     {historyError && <div role="alert" style={{ color: "#d98a7c", margin: "12px 0" }}>{historyError} <button className="hg-btn" style={userButtonStyle} onClick={() => setRetry((value) => value + 1)}>Reload history</button></div>}
+    {retailerFilter && <p>Showing exact retailer-linked orders you are permitted to read. Older unlinked orders are not included.</p>}
     {!selected ? <>
       <input aria-label="Search retailer history" placeholder="Search retailer name…" value={search} onChange={(e) => setSearch(e.target.value)} style={{ ...userFieldStyle, margin: "12px 0" }} />
       {!ready ? <p>Loading saved orders…</p> : !orders.length ? <p>No saved orders yet.</p> : !filtered.length ? <p>No orders match this retailer search.</p> : <>
@@ -855,6 +858,7 @@ function OrderHistory({ user, profile, cigars, packOptions, draft, requirePermis
       </>}
     </> : <>
       <h2 style={{ fontFamily: "'Oswald', sans-serif" }}>{selected.retailerName || "Retailer not recorded"}</h2>
+      {validRetailerId(selected.retailerId) && onOpenRetailer && <button className="hg-btn" style={userButtonStyle} onClick={() => onOpenRetailer(selected.retailerId)}>Open Retailer Profile</button>}
       <p>{savedOrderDate(selected.savedAt)}{selected.creatorDisplayName ? ` · ${selected.creatorDisplayName}` : ""}</p>
       <p style={{ color: "#8A93A0", overflowWrap: "anywhere" }}>Order {selected.id}</p>
       {selected.retailerEmail && <p>{selected.retailerEmail}</p>}
@@ -890,6 +894,149 @@ function OrderHistory({ user, profile, cigars, packOptions, draft, requirePermis
         </div>
       </div>}
     </>}
+  </div>;
+}
+
+const RETAILER_FIELDS = Object.freeze({ name: "Retailer Name", contactName: "Contact Name", email: "Email", phone: "Phone", address1: "Address 1", address2: "Address 2", city: "City", state: "State", postalCode: "Postal Code", country: "Country", website: "Website", notes: "Customer Notes" });
+const retailerSearch = (retailer, search) => [retailer.name, retailer.contactName, retailer.city, retailer.state].some((value) => normalizeRetailerName(value || "").includes(normalizeRetailerName(search)));
+const validRetailerId = (id) => typeof id === "string" && id.length > 0 && id.length <= 128 && !id.includes("/");
+const hasMeaningfulDraft = (draft) => Boolean(draft.retailerId || draft.orderItems.length || [draft.orderRetailer, draft.orderEmail, draft.orderNotes].some((value) => value.trim()));
+const retailerOrderFields = (retailer) => {
+  if (!retailer?.active || !validRetailerId(retailer.id)) throw new Error("This retailer is no longer available for new orders.");
+  return { retailerId: retailer.id, orderRetailer: retailer.name, orderEmail: retailer.email };
+};
+function validateRetailer(input) {
+  const result = {};
+  for (const key of Object.keys(RETAILER_FIELDS)) {
+    if (typeof input[key] !== "string") throw new Error(`Invalid ${RETAILER_FIELDS[key]}.`);
+    result[key] = input[key].trim();
+    if (result[key].length > (key === "notes" ? 5000 : 500)) throw new Error(`${RETAILER_FIELDS[key]} is too long.`);
+  }
+  if (!result.name) throw new Error("Retailer Name is required.");
+  if (result.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(result.email)) throw new Error("Enter a valid email address.");
+  if (typeof input.active !== "boolean") throw new Error("Invalid retailer status.");
+  return { ...result, active: input.active, nameNormalized: normalizeRetailerName(result.name) };
+}
+function findDuplicateRetailer(retailers, name, exceptId = null) {
+  return retailers.find((retailer) => retailer.id !== exceptId && retailer.active && retailer.nameNormalized === normalizeRetailerName(name));
+}
+async function saveRetailerProfile(id, input, uid, requirePermission) {
+  const permitted = () => auth.currentUser?.uid === uid && requirePermission("canUseRetailers");
+  if (!permitted()) throw new Error("You are not authorized to manage retailers.");
+  const data = validateRetailer(input);
+  if (!id) {
+    // Advisory duplicate check, not a global uniqueness guarantee across simultaneous clients.
+    const existing = await getDocs(query(collection(db, "retailers"), where("active", "==", true)));
+    if (!permitted()) throw new Error("Your retailer access changed.");
+    const duplicate = findDuplicateRetailer(existing.docs.map((item) => ({ ...item.data(), id: item.id })), data.name);
+    if (duplicate) { const error = new Error("An active retailer with this name already exists."); error.retailerId = duplicate.id; throw error; }
+  }
+  const ref = id ? doc(db, "retailers", id) : doc(collection(db, "retailers"));
+  await runTransaction(db, async (transaction) => {
+    const profile = await transaction.get(doc(db, "users", uid));
+    const permissions = getProfilePermissions(profile.exists() ? profile.data() : null);
+    if (!permitted() || !permissions.canUseRetailers) throw new Error("Your retailer access changed.");
+    if (id) {
+      const previous = await transaction.get(ref);
+      if (!previous.exists()) throw new Error("This retailer no longer exists.");
+      if (!permissions.canChangeRetailerStatus && (!previous.data().active || data.active !== previous.data().active)) throw new Error("You cannot change retailer status or edit an inactive retailer.");
+      if (!permitted()) throw new Error("Your retailer access changed.");
+      transaction.update(ref, { ...data, updatedAt: serverTimestamp() });
+    } else {
+      if (!data.active) throw new Error("New retailers must be active.");
+      transaction.set(ref, { ...data, schemaVersion: 1, creatorUid: uid, creatorDisplayName: profile.data().displayName, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+    }
+  });
+  return ref.id;
+}
+function useRetailerDirectory(user, profile, enabled) {
+  const scope = enabled ? `${user.uid}:${profile.role}` : "";
+  const [state, setState] = useState({ scope: "", records: [], ready: false, error: "" });
+  const [retry, setRetry] = useState(0);
+  useEffect(() => {
+    let live = true;
+    setState({ scope, records: [], ready: false, error: "" });
+    if (!scope) return () => { live = false; };
+    const manager = getProfilePermissions(profile).canChangeRetailerStatus;
+    const source = manager ? collection(db, "retailers") : query(collection(db, "retailers"), where("active", "==", true));
+    const stop = onSnapshot(source, (snapshot) => {
+      if (!live || auth.currentUser?.uid !== user.uid) return;
+      const records = snapshot.docs.map((item) => ({ ...item.data(), id: item.id })).filter((item) => manager || item.active);
+      records.sort((a, b) => a.nameNormalized.localeCompare(b.nameNormalized));
+      setState({ scope, records, ready: true, error: "" });
+    }, (error) => { if (live) setState({ scope, records: [], ready: true, error: `Could not load retailers: ${error.message}` }); });
+    return () => { live = false; stop(); };
+  }, [scope, retry]);
+  return { ...(state.scope === scope ? state : { records: [], ready: false, error: "" }), reload: () => setRetry((value) => value + 1) };
+}
+function RetailerEditor({ retailer, currentUid, canChangeStatus, requirePermission, onClose, onSaved, onOpenExisting }) {
+  const [form, setForm] = useState(() => ({ ...Object.fromEntries(Object.keys(RETAILER_FIELDS).map((key) => [key, retailer?.[key] || (key === "country" ? "United States" : "")])), active: retailer?.active ?? true }));
+  const [error, setError] = useState("");
+  const [duplicateId, setDuplicateId] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const mounted = useRef(true);
+  const busy = useRef(false);
+  useEffect(() => () => { mounted.current = false; }, []);
+  const submit = async (event) => {
+    event.preventDefault();
+    if (busy.current || !requirePermission("canUseRetailers")) return;
+    busy.current = true; setSaving(true); setError(""); setDuplicateId(null);
+    try {
+      const id = await saveRetailerProfile(retailer?.id, form, currentUid, requirePermission);
+      if (mounted.current && auth.currentUser?.uid === currentUid && requirePermission("canUseRetailers")) onSaved(id);
+    } catch (failure) { if (mounted.current) { setError(failure.message); setDuplicateId(failure.retailerId || null); } }
+    finally { busy.current = false; if (mounted.current) setSaving(false); }
+  };
+  return <div role="dialog" aria-modal="true" aria-label={retailer ? "Edit Retailer" : "Add Retailer"} style={{ position: "fixed", inset: 0, zIndex: 65, background: "rgba(0,0,0,0.7)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+    <form onSubmit={submit} className="hg-scroll" style={{ background: "#1c1f24", border: "1px solid #B8894C", borderRadius: 8, padding: 20, width: "100%", maxWidth: 640, maxHeight: "85vh", overflowY: "auto" }}>
+      <h2>{retailer ? "Edit Retailer" : "Add Retailer"}</h2>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
+        {Object.entries(RETAILER_FIELDS).map(([key, label]) => <label key={key}>{label}{key === "name" ? " *" : ""}
+          {key === "notes" ? <textarea aria-label={label} value={form[key]} maxLength={5000} disabled={saving} onChange={(e) => setForm({ ...form, [key]: e.target.value })} style={{ ...userFieldStyle, boxSizing: "border-box" }} /> : <input aria-label={label} value={form[key]} required={key === "name"} maxLength={500} disabled={saving} onChange={(e) => setForm({ ...form, [key]: e.target.value })} style={{ ...userFieldStyle, boxSizing: "border-box" }} />}
+        </label>)}
+      </div>
+      {retailer && canChangeStatus && <label><input type="checkbox" checked={form.active} disabled={saving} onChange={(e) => setForm({ ...form, active: e.target.checked })} /> Active</label>}
+      {error && <p role="alert" style={{ color: "#d98a7c" }}>{error}</p>}
+      {duplicateId && <button type="button" className="hg-btn" style={userButtonStyle} onClick={() => onOpenExisting(duplicateId)}>Open Existing Retailer</button>}
+      <div style={{ display: "flex", gap: 10, marginTop: 16 }}><button className="hg-btn" style={userButtonStyle} disabled={saving}>{saving ? "Saving…" : "Save Retailer"}</button><button type="button" className="hg-btn" style={userButtonStyle} onClick={onClose}>Cancel</button></div>
+    </form>
+  </div>;
+}
+function RetailerDirectory({ directory, selectedId, onSelect, user, permissions, draft, requirePermission, onStartOrder, onHistory, onClose }) {
+  const [search, setSearch] = useState("");
+  const [editor, setEditor] = useState(null);
+  const [replace, setReplace] = useState(false);
+  const selected = directory.records.find((item) => item.id === selectedId);
+  useEffect(() => { setEditor(null); setReplace(false); }, [selectedId, selected?.active]);
+  const select = (id) => { if (requirePermission("canUseRetailers")) { setEditor(null); onSelect(id); } };
+  const start = () => {
+    if (!requirePermission("canUseRetailers") || !selected?.active) return;
+    if (hasMeaningfulDraft(draft)) setReplace(true); else onStartOrder(selected.id);
+  };
+  const results = directory.records.filter((item) => retailerSearch(item, search));
+  return <div style={{ maxWidth: 1000, margin: "0 auto", padding: 24 }}>
+    <button className="hg-btn" style={userButtonStyle} onClick={selectedId ? () => select(null) : onClose}><ArrowLeft size={14} /> {selectedId ? "Back to Retailers" : "Back to list"}</button>
+    <h1 style={{ fontFamily: "'Bebas Neue', sans-serif" }}>Retailers</h1>
+    {directory.error && <p role="alert">{directory.error} <button className="hg-btn" style={userButtonStyle} onClick={directory.reload}>Reload Retailers</button></p>}
+    {!directory.ready ? <p>Loading retailers…</p> : selectedId ? selected ? <>
+      <h2>{selected.name}</h2><p>{selected.active ? "Active" : "Inactive — unavailable for new orders"}</p>
+      {Object.entries(RETAILER_FIELDS).filter(([key]) => key !== "name").map(([key, label]) => selected[key] && <p key={key} style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}><strong>{label}:</strong> {selected[key]}</p>)}
+      <p>Created by {selected.creatorDisplayName || "Not recorded"} · {savedOrderDate(selected.createdAt)}</p>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+        <button className="hg-btn" style={userButtonStyle} onClick={() => { if (requirePermission("canUseRetailers")) setEditor(selected); }}>Edit Retailer</button>
+        <button className="hg-btn" style={userButtonStyle} disabled={!selected.active} onClick={start}>Start New Order</button>
+        <button className="hg-btn" style={userButtonStyle} onClick={() => { if (requirePermission("canUseRetailers")) onHistory(selected.id); }}>View Linked Orders</button>
+      </div><p style={{ color: "#8A93A0" }}>Linked history uses exact retailer IDs. Older free-text orders remain available through Order History search.</p>
+    </> : <p>This retailer is inactive, no longer exists, or is not available to your account.</p> : <>
+      <button className="hg-btn" style={userButtonStyle} onClick={() => { if (requirePermission("canUseRetailers")) setEditor({}); }}>+ Add Retailer</button>
+      <input aria-label="Search retailers" placeholder="Search name, contact, city or state…" style={{ ...userFieldStyle, boxSizing: "border-box", margin: "16px 0" }} value={search} onChange={(e) => setSearch(e.target.value)} />
+      {!directory.records.length ? <p>No retailers yet.</p> : !results.length ? <p>No retailers match your search.</p> : results.map((item) => <button key={item.id} className="hg-btn" style={{ ...userButtonStyle, display: "block", width: "100%", textAlign: "left", padding: 16, marginBottom: 10 }} onClick={() => select(item.id)}>
+        <strong>{item.name}</strong>{permissions.canChangeRetailerStatus && <span> · {item.active ? "Active" : "Inactive"}</span>}
+        <div>{[item.city, item.state].filter(Boolean).join(", ")}</div><div>{[item.contactName, item.email, item.phone].filter(Boolean).join(" · ")}</div>
+      </button>)}
+    </>}
+    {editor && (!editor.id || (selected && (selected.active || permissions.canChangeRetailerStatus))) && <RetailerEditor retailer={editor.id ? editor : null} currentUid={user.uid} canChangeStatus={permissions.canChangeRetailerStatus} requirePermission={requirePermission} onClose={() => setEditor(null)} onSaved={select} onOpenExisting={select} />}
+    {replace && selected?.active && <div role="dialog" aria-modal="true" aria-label="Replace current order" style={{ position: "fixed", inset: 0, zIndex: 65, background: "rgba(0,0,0,0.7)", display: "grid", placeItems: "center", padding: 16 }}><div style={{ background: "#1c1f24", border: "1px solid #B8894C", borderRadius: 8, padding: 24 }}><h2>Start New Order for {selected.name}?</h2><p>Your current active draft will be replaced. Saved orders remain unchanged.</p><button className="hg-btn" style={userButtonStyle} onClick={() => { if (requirePermission("canUseRetailers")) onStartOrder(selected.id, true); }}>Replace Current Order</button> <button className="hg-btn" style={userButtonStyle} onClick={() => setReplace(false)}>Cancel</button></div></div>}
   </div>;
 }
 
@@ -1000,6 +1147,10 @@ function HazeGrayReference() {
   const [showOrderBuilder, setShowOrderBuilder] = useState(false);
   const [showFinalReview, setShowFinalReview] = useState(false);
   const [showOrderHistory, setShowOrderHistory] = useState(false);
+  const [showRetailers, setShowRetailers] = useState(false);
+  const [selectedRetailerId, setSelectedRetailerId] = useState(null);
+  const [historyRetailerId, setHistoryRetailerId] = useState(null);
+  const [retailerId, setRetailerId] = useState("");
   const draftOwnerRef = useRef(null);
   const [draftUid, setDraftUid] = useState(null);
   const [orderItems, setOrderItems] = useState([]);
@@ -1125,6 +1276,7 @@ function HazeGrayReference() {
   } catch (e) {
     // Clearing the in-memory order should still work if storage is unavailable.
   }
+  setRetailerId("");
   setOrderItems([]);
   setOrderRetailer("");
   setOrderEmail("");
@@ -1288,10 +1440,12 @@ const openOrderFromCompare = (cigarId) => {
   const isAuthorizedUser = Boolean(user && profileReady && isActiveProfile(userProfile));
   const permissions = isAuthorizedUser ? getProfilePermissions(userProfile) : NO_PERMISSIONS;
   const { canEditCatalog, canEditPackages, canUseOrderBuilder, canUseFinalReview, canManageUsers, canMigrateLegacyData } = permissions;
-  const activeDraft = { orderItems, orderRetailer, orderEmail, orderNotes };
+  const directory = useRetailerDirectory(user, userProfile, permissions.canUseRetailers);
+  const activeDraft = { orderItems, orderRetailer, orderEmail, orderNotes, retailerId };
   const clearProtectedDraft = () => {
     draftOwnerRef.current = null;
     setDraftUid(null);
+    setRetailerId(""); setShowRetailers(false); setSelectedRetailerId(null); setHistoryRetailerId(null);
     setOrderItems([]); setOrderRetailer(""); setOrderEmail(""); setOrderNotes("");
     setShowOrderBuilder(false); setShowFinalReview(false); setShowOrderHistory(false);
     setCompareOrderId(null); setCopyConfirmed(false);
@@ -1302,10 +1456,10 @@ const openOrderFromCompare = (cigarId) => {
         accessRef.current.uid !== draftUid || !accessRef.current.permissions.canUseOrderBuilder) return;
     try {
       const key = orderDraftKey(draftUid);
-      if (!orderItems.length && !orderRetailer && !orderEmail && !orderNotes) localStorage.removeItem(key);
-      else localStorage.setItem(key, JSON.stringify({ orderItems, orderRetailer, orderEmail, orderNotes }));
+      if (!orderItems.length && !orderRetailer && !orderEmail && !orderNotes && !retailerId) localStorage.removeItem(key);
+      else localStorage.setItem(key, JSON.stringify({ orderItems, orderRetailer, orderEmail, orderNotes, retailerId }));
     } catch { /* Keep the in-memory order usable when storage is unavailable. */ }
-  }, [draftUid, orderItems, orderRetailer, orderEmail, orderNotes]);
+  }, [draftUid, orderItems, orderRetailer, orderEmail, orderNotes, retailerId]);
 
   useEffect(() => { if (!canUseOrderBuilder) setShowOrderHistory(false); }, [canUseOrderBuilder, user?.uid]);
   // Read current access inside handlers, including async continuations and stale callbacks.
@@ -1346,6 +1500,7 @@ const openOrderFromCompare = (cigarId) => {
           const restored = loadOrderDraft(u.uid);
           draftOwnerRef.current = u.uid;
           setDraftUid(u.uid);
+          setRetailerId(restored.retailerId || "");
           setOrderItems(restored.orderItems || []);
           setOrderRetailer(restored.orderRetailer || "");
           setOrderEmail(restored.orderEmail || "");
@@ -1374,6 +1529,7 @@ const openOrderFromCompare = (cigarId) => {
   }, [canEditCatalog, canUseOrderBuilder, canUseFinalReview, canManageUsers]);
 
   const openOrderBuilder = () => {
+    setShowRetailers(false);
     if (!requirePermission("canUseOrderBuilder")) return;
     setShowOrderHistory(false);
     setShowAuthorizedUsers(false);
@@ -1385,13 +1541,16 @@ const openOrderFromCompare = (cigarId) => {
     setShowFinalReview(true);
   };
   const openAuthorizedUsers = () => {
+    setShowRetailers(false);
     if (!requirePermission("canManageUsers")) return;
     setShowOrderHistory(false);
     setShowOrderBuilder(false);
     setShowFinalReview(false);
     setShowAuthorizedUsers(true);
   };
-  const openOrderHistory = () => {
+  const openOrderHistory = (filterId = null) => {
+    setShowRetailers(false);
+    setHistoryRetailerId(typeof filterId === "string" ? filterId : null);
     if (!requirePermission("canUseOrderBuilder")) return;
     setShowAuthorizedUsers(false); setShowFinalReview(false); setShowOrderBuilder(false); setShowOrderHistory(true);
   };
@@ -1404,8 +1563,30 @@ const openOrderFromCompare = (cigarId) => {
     if (!["replace", "add"].includes(mode) || !currentPlan.available.length) throw new Error("No valid reorder selection.");
     const next = mergeReorderItems(mode === "add" ? orderItems : [], currentPlan.available.map((item) => item.line));
     setOrderItems(next);
-    if (mode === "replace") { setOrderRetailer(order.retailerName || ""); setOrderEmail(order.retailerEmail || ""); setOrderNotes(order.notes || ""); }
+    if (mode === "replace") { setRetailerId(validRetailerId(order.retailerId) ? order.retailerId : ""); setOrderRetailer(order.retailerName || ""); setOrderEmail(order.retailerEmail || ""); setOrderNotes(order.notes || ""); }
     openOrderBuilder();
+  };
+  const openRetailer = (id = null) => {
+    if (!requirePermission("canUseRetailers")) return;
+    setSelectedRetailerId(id); setShowRetailers(true);
+    setShowOrderHistory(false); setShowOrderBuilder(false); setShowFinalReview(false); setShowAuthorizedUsers(false);
+  };
+  const selectOrderRetailer = (id) => {
+    if (!requirePermission("canUseOrderBuilder")) return;
+    if (!id) { setRetailerId(""); return; }
+    const retailer = directory.records.find((item) => item.id === id);
+    try { const fields = retailerOrderFields(retailer); setRetailerId(fields.retailerId); setOrderRetailer(fields.orderRetailer); setOrderEmail(fields.orderEmail); }
+    catch (failure) { setError(failure.message); }
+  };
+  const startRetailerOrder = (id, replaceConfirmed = false) => {
+    if (hasMeaningfulDraft(activeDraft) && !replaceConfirmed) { setError("Confirm replacement of the current draft before starting a new retailer order."); return; }
+    if (!requirePermission("canUseRetailers") || !requirePermission("canUseOrderBuilder")) return;
+    const retailer = directory.records.find((item) => item.id === id);
+    try {
+      const fields = retailerOrderFields(retailer);
+      setOrderItems([]); setOrderNotes(""); setRetailerId(fields.retailerId); setOrderRetailer(fields.orderRetailer); setOrderEmail(fields.orderEmail);
+      openOrderBuilder();
+    } catch (failure) { setError(failure.message); }
   };
   const saveAuthorizationProfile = async (uid, changes) => {
     if (!requirePermission("canManageUsers")) throw new Error("You are not authorized to manage users.");
@@ -1720,7 +1901,8 @@ const openOrderFromCompare = (cigarId) => {
               }}>
                 <ShoppingCart size={15} /> Order Builder{orderItems.length > 0 ? ` (${orderItems.length})` : ""}
               </button>}
-              {canUseOrderBuilder && <button className="hg-btn" onClick={openOrderHistory} style={userButtonStyle}>Order History</button>}
+              {permissions.canUseRetailers && <button className="hg-btn" onClick={() => openRetailer()} style={userButtonStyle}>Retailers</button>}
+              {canUseOrderBuilder && <button className="hg-btn" onClick={() => openOrderHistory()} style={userButtonStyle}>Order History</button>}
               {canEditCatalog && <button className="hg-btn" onClick={openAdd} style={{
                 display: "flex", alignItems: "center", gap: 8, background: "#B8894C", color: "#14161A",
                 border: "none", borderRadius: 4, padding: "10px 16px", fontFamily: "'Oswald', sans-serif",
@@ -1764,8 +1946,10 @@ const openOrderFromCompare = (cigarId) => {
         </div>
       )}
 
-      {showOrderHistory && canUseOrderBuilder ? (
-        <OrderHistory key={`${user.uid}:${userProfile.role}`} user={user} profile={userProfile} cigars={cigars} packOptions={PACK_OPTIONS} draft={activeDraft} requirePermission={requirePermission} onApplyReorder={applyReorder} onClose={() => { setShowOrderHistory(false); setShowCompare(false); setSelectedId(null); }} />
+      {showRetailers && permissions.canUseRetailers ? (
+        <RetailerDirectory key={`${user.uid}:${userProfile.role}`} directory={directory} selectedId={selectedRetailerId} onSelect={setSelectedRetailerId} user={user} permissions={permissions} draft={activeDraft} requirePermission={requirePermission} onStartOrder={startRetailerOrder} onHistory={openOrderHistory} onClose={() => setShowRetailers(false)} />
+      ) : showOrderHistory && canUseOrderBuilder ? (
+        <OrderHistory retailerFilter={historyRetailerId} onOpenRetailer={openRetailer} key={`${user.uid}:${userProfile.role}:${historyRetailerId || "all"}`} user={user} profile={userProfile} cigars={cigars} packOptions={PACK_OPTIONS} draft={activeDraft} requirePermission={requirePermission} onApplyReorder={applyReorder} onClose={() => { setShowOrderHistory(false); setShowCompare(false); setSelectedId(null); }} />
       ) : showAuthorizedUsers && canManageUsers ? (
         <AuthorizedUsers key={user.uid} currentUid={user.uid} managerProfile={userProfile} requirePermission={requirePermission} onSave={saveAuthorizationProfile} onClose={() => { setShowAuthorizedUsers(false); setShowCompare(false); setSelectedId(null); }} />
       ) : loading ? (
@@ -2165,14 +2349,24 @@ const text = [
           <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 32, letterSpacing: 1, marginBottom: 16 }}>Order Builder</div>
 
           <div style={{ border: "1px solid #2c3036", borderRadius: 8, padding: "16px 18px", marginBottom: 20 }}>
+            <label>Select Existing Retailer or Manual Entry
+              <select aria-label="Order retailer" value={retailerId} onChange={(e) => selectOrderRetailer(e.target.value)} style={{ ...userFieldStyle, marginBottom: 12 }}>
+                <option value="">One-time / Manual Retailer</option>
+                {retailerId && !directory.records.some((item) => item.id === retailerId && item.active) && <option value={retailerId}>Linked retailer unavailable</option>}
+                {directory.records.filter((item) => item.active).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+              </select>
+            </label>
+            {directory.error && <p role="alert">{directory.error} <button className="hg-btn" style={userButtonStyle} onClick={directory.reload}>Reload Retailers</button></p>}
+            {retailerId && directory.ready && !directory.records.some((item) => item.id === retailerId && item.active) && <p role="alert" style={{ color: "#d98a7c" }}>The linked retailer is inactive or unavailable. Your captured name/email are preserved. Select another retailer or switch to manual entry.</p>}
+            {retailerId && <p>Linked retailer snapshot. Switch to manual entry to edit name/email. Customer notes are not copied into order notes.</p>}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
               <div>
                 <label style={{ fontFamily: "'Oswald', sans-serif", fontSize: 10.5, letterSpacing: 1.5, color: "#8A93A0", textTransform: "uppercase" }}>Retailer Name</label>
-                <input value={orderRetailer} onChange={(e) => { if (requirePermission("canUseOrderBuilder")) setOrderRetailer(e.target.value); }} style={{ width: "100%", marginTop: 4, background: "#14161A", border: "1px solid #454b53", borderRadius: 4, padding: "8px 10px", color: "#EDE6D6", fontSize: 14 }} />
+                <input disabled={Boolean(retailerId)} value={orderRetailer} onChange={(e) => { if (requirePermission("canUseOrderBuilder")) setOrderRetailer(e.target.value); }} style={{ width: "100%", marginTop: 4, background: "#14161A", border: "1px solid #454b53", borderRadius: 4, padding: "8px 10px", color: "#EDE6D6", fontSize: 14 }} />
               </div>
               <div>
                 <label style={{ fontFamily: "'Oswald', sans-serif", fontSize: 10.5, letterSpacing: 1.5, color: "#8A93A0", textTransform: "uppercase" }}>Retailer Contact Email</label>
-                <input value={orderEmail} onChange={(e) => { if (requirePermission("canUseOrderBuilder")) setOrderEmail(e.target.value); }} style={{ width: "100%", marginTop: 4, background: "#14161A", border: "1px solid #454b53", borderRadius: 4, padding: "8px 10px", color: "#EDE6D6", fontSize: 14 }} />
+                <input disabled={Boolean(retailerId)} value={orderEmail} onChange={(e) => { if (requirePermission("canUseOrderBuilder")) setOrderEmail(e.target.value); }} style={{ width: "100%", marginTop: 4, background: "#14161A", border: "1px solid #454b53", borderRadius: 4, padding: "8px 10px", color: "#EDE6D6", fontSize: 14 }} />
               </div>
             </div>
             <label style={{ fontFamily: "'Oswald', sans-serif", fontSize: 10.5, letterSpacing: 1.5, color: "#8A93A0", textTransform: "uppercase" }}>Notes</label>

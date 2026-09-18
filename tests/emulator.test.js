@@ -73,6 +73,44 @@ test('Spark browser SDK and Auth/Firestore rules', { skip: !enabled, timeout: 12
       const p=make(rep);p.lineItems[0].unitPrice=0.01; // Rules deliberately do not validate every line or catalog prices.
       const ref=reference(rep);await write(rep,p,ref);assert.equal((await sdk.getDocFromServer(ref)).data().lineItems[0].unitPrice,0.01);
     });
+    await t.test('retailers: shared reads, creation, status restrictions and immutable audit fields',async()=>{
+      const form = { ...Object.fromEntries(Object.keys(rep.client.RETAILER_FIELDS).map(key=>[key,''])), name:'Shared Shop '+Date.now(), active:true };
+      const makeRetailer = (a) => ({ ...a.client.validateRetailer(form),schemaVersion:1,creatorUid:a.uid,creatorDisplayName:a.profile.displayName,createdAt:sdk.serverTimestamp(),updatedAt:sdk.serverTimestamp() });
+      const refs=[];
+      for(const a of allowed){const ref=sdk.doc(sdk.collection(a.db,'retailers'));await sdk.setDoc(ref,makeRetailer(a));refs.push(ref.id);}
+      const id=refs[0], repRef=sdk.doc(rep.db,'retailers',id), ownerRef=sdk.doc(owner.db,'retailers',id), adminRef=sdk.doc(admin.db,'retailers',id);
+      assert((await sdk.getDocFromServer(repRef)).exists());
+      assert((await sdk.getDocsFromServer(sdk.query(sdk.collection(rep.db,'retailers'),sdk.where('active','==',true)))).size>=3);
+      await denied(sdk.getDocsFromServer(sdk.collection(rep.db,'retailers')));
+      for(const a of actors.filter(a=>!allowed.includes(a))){await denied(sdk.setDoc(sdk.doc(sdk.collection(a.db,'retailers')),makeRetailer(a)));await denied(sdk.getDocFromServer(sdk.doc(a.db,'retailers',id)));}
+      await denied(sdk.setDoc(sdk.doc(sdk.collection(rep.db,'retailers')),{...makeRetailer(rep),creatorUid:owner.uid}));
+      await denied(sdk.setDoc(sdk.doc(sdk.collection(rep.db,'retailers')),{...makeRetailer(rep),createdAt:sdk.Timestamp.fromMillis(0)}));
+      await denied(sdk.setDoc(sdk.doc(sdk.collection(rep.db,'retailers')),{...makeRetailer(rep),active:false}));
+      await sdk.updateDoc(repRef,{phone:'+1 (555) 123-4567',updatedAt:sdk.serverTimestamp()});
+      await denied(sdk.updateDoc(repRef,{active:false,updatedAt:sdk.serverTimestamp()}));
+      for(const a of allowed){const ref=sdk.doc(a.db,'retailers',id);await denied(sdk.deleteDoc(ref));for(const patch of [{creatorUid:rep.uid},{creatorDisplayName:'Different'},{createdAt:sdk.Timestamp.fromMillis(0)},{schemaVersion:2}])await denied(sdk.updateDoc(ref,{...patch,updatedAt:sdk.serverTimestamp()}));}
+      await sdk.updateDoc(ownerRef,{active:false,updatedAt:sdk.serverTimestamp()});
+      assert((await sdk.getDocFromServer(adminRef)).exists());await denied(sdk.getDocFromServer(repRef));await denied(sdk.updateDoc(repRef,{active:true,updatedAt:sdk.serverTimestamp()}));
+      await sdk.updateDoc(adminRef,{active:true,updatedAt:sdk.serverTimestamp()});assert((await sdk.getDocFromServer(repRef)).exists());
+      for(const patch of [{name:''},{phone:123},{notes:'x'.repeat(5001)},{extra:'not allowed'},{updatedAt:sdk.Timestamp.fromMillis(0)}])await denied(sdk.updateDoc(ownerRef,{updatedAt:sdk.serverTimestamp(),...patch}));
+      await assert.rejects(rep.client.saveRetailerProfile(null,form,rep.uid,()=>true),e=>!!e.retailerId);
+      const unique={...form,name:'Client-created '+Date.now()};
+      const created=await rep.client.saveRetailerProfile(null,unique,rep.uid,()=>true);
+      await rep.client.saveRetailerProfile(created,{...unique,city:'Port City'},rep.uid,()=>true);
+      assert.equal((await sdk.getDocFromServer(sdk.doc(rep.db,'retailers',created))).data().city,'Port City');
+      await assert.rejects(rep.client.saveRetailerProfile(created,{...unique,active:false},rep.uid,()=>true),/status/);
+      await assert.rejects(rep.client.saveRetailerProfile(null,unique,rep.uid,()=>false),/authorized/);
+    });
+    await t.test('linked and manual saved orders retain snapshots and order read restrictions',async()=>{
+      const payload={...make(rep),retailerId:'linked-retailer'}, pending={id:reference(rep).id,uid:rep.uid,payload};
+      await rep.client.savePendingOrder(pending,rep.uid,()=>true,[cigar],rep.client.PACK_OPTIONS);
+      const saved=(await sdk.getDocFromServer(sdk.doc(rep.db,'orders',pending.id))).data();
+      assert.equal(saved.retailerId,'linked-retailer');assert.equal(saved.retailerName,payload.retailerName);
+      for(const retailerId of ['',null,123,'x'.repeat(129),'a/b'])await denied(write(rep,{...make(rep),retailerId}));
+      await write(rep,make(rep));
+      const ownerOrder=reference(owner);await write(owner,{...make(owner),retailerId:'linked-retailer'},ownerOrder);
+      await denied(sdk.getDocFromServer(sdk.doc(rep.db,'orders',ownerOrder.id)));
+    });
     await t.test('profile revocation and sign-out deny fresh reads and writes',async()=>{
       await seed('/users/'+rep.uid,{...rep.profile,active:false});await denied(write(rep,make(rep)));await denied(sdk.getDocFromServer(sdk.doc(rep.db,'orders',savedRefs.get('field_rep'))));
       await authSdk.signOut(owner.auth);await denied(write(owner,make(owner)));await denied(sdk.getDocFromServer(sdk.doc(owner.db,'orders',savedRefs.get('owner'))));

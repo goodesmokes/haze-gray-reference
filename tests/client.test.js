@@ -20,7 +20,7 @@ assert.notEqual(legacyRules(rules.replace('allow create, update, delete: if isMa
 assert.notEqual(legacyRules(rules.replace('request.resource.data.role == resource.data.role','true')),legacyRules(rules), 'Authorized Users protection changes must remain detectable');
 console.log('PASS preservation: config, seed data, gauges, catalog/Authorized Users rules, pricing, original order handlers and exports');
 const ctx={console,TextEncoder};vm.createContext(ctx);
-for(const name of ['parseMoney','getNumericPrice','getSinglePrice','buildSavedOrder','buildReorderPlan','mergeReorderItems','loadOrderDraft'])vm.runInContext(text(name),ctx);
+for(const name of ['parseMoney','getNumericPrice','getSinglePrice','validRetailerId', 'buildSavedOrder','buildReorderPlan','mergeReorderItems','loadOrderDraft'])vm.runInContext(text(name),ctx);
 for(const name of ['normalizeRetailerName','orderMoney','nonnegativeMoney','savedOrderDate','ORDER_DRAFT_STORAGE_KEY','PACK_OPTIONS','SEED_CIGARS'])vm.runInContext('globalThis.'+name+'='+text(name),ctx);
 const user={uid:'rep'},profile={displayName:'Test Rep',role:'field_rep',active:true};
 const line={lineKey:'1982__1982-robusto__box10',cigarId:'1982',cigarName:'1982',vitola:'Robusto',dims:'50 x 5',packKey:'box10',packLabel:'10ct Box',unitPrice:60,retailUnitValue:124,qty:2};

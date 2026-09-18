@@ -159,9 +159,10 @@ match /orders/{orderId} {
   // Internal reference snapshots: line contents/pricing are supplied by the client.
   // Validate only bounded top-level structure; never iterate all order lines here.
   allow create: if canUseOrders()
-    && request.resource.data.keys().hasOnly(['schemaVersion', 'status', 'retailerName', 'retailerNameNormalized', 'retailerEmail', 'notes', 'creatorUid', 'creatorDisplayName', 'savedAt', 'lineItems', 'totals'])
+    && request.resource.data.keys().hasOnly(['retailerId', 'schemaVersion', 'status', 'retailerName', 'retailerNameNormalized', 'retailerEmail', 'notes', 'creatorUid', 'creatorDisplayName', 'savedAt', 'lineItems', 'totals'])
     && request.resource.data.keys().hasAll(['schemaVersion', 'status', 'retailerName', 'retailerNameNormalized', 'retailerEmail', 'notes', 'creatorUid', 'creatorDisplayName', 'savedAt', 'lineItems', 'totals'])
     && request.resource.data.creatorUid == request.auth.uid
+    && (!('retailerId' in request.resource.data) || (request.resource.data.retailerId is string && request.resource.data.retailerId.size() > 0 && request.resource.data.retailerId.size() <= 128 && !request.resource.data.retailerId.matches('.*[/].*')))
     && request.resource.data.creatorDisplayName is string && request.resource.data.creatorDisplayName.size() <= 500
     && request.resource.data.creatorDisplayName == userDoc(request.auth.uid).data.displayName
     && request.resource.data.schemaVersion is int && request.resource.data.schemaVersion == 1
@@ -181,6 +182,50 @@ match /orders/{orderId} {
     && request.resource.data.totals.totalQuantity is int && request.resource.data.totals.totalQuantity > 0 && request.resource.data.totals.totalQuantity <= 100000000
     && request.resource.data.totals.lineCount is int && request.resource.data.totals.lineCount == request.resource.data.lineItems.size();
   allow update, delete: if false;
+}
+
+// -------------------------------
+// SHARED RETAILER DIRECTORY
+// -------------------------------
+function validRetailer(data) {
+  return data.keys().hasOnly(['schemaVersion', 'active', 'name', 'contactName', 'email', 'phone', 'address1', 'address2', 'city', 'state', 'postalCode', 'country', 'website', 'notes', 'nameNormalized', 'creatorUid', 'creatorDisplayName', 'createdAt', 'updatedAt'])
+    && data.keys().hasAll(['schemaVersion', 'active', 'name', 'contactName', 'email', 'phone', 'address1', 'address2', 'city', 'state', 'postalCode', 'country', 'website', 'notes', 'nameNormalized', 'creatorUid', 'creatorDisplayName', 'createdAt', 'updatedAt'])
+    && data.schemaVersion is int && data.schemaVersion == 1
+    && data.active is bool
+    && data.name is string && data.name.size() <= 500
+    && data.contactName is string && data.contactName.size() <= 500
+    && data.email is string && data.email.size() <= 500
+    && data.phone is string && data.phone.size() <= 500
+    && data.address1 is string && data.address1.size() <= 500
+    && data.address2 is string && data.address2.size() <= 500
+    && data.city is string && data.city.size() <= 500
+    && data.state is string && data.state.size() <= 500
+    && data.postalCode is string && data.postalCode.size() <= 500
+    && data.country is string && data.country.size() <= 500
+    && data.website is string && data.website.size() <= 500
+    && data.notes is string && data.notes.size() <= 5000
+    && data.name.size() > 0 && data.name.matches('.*[^ ].*')
+    && data.nameNormalized is string && data.nameNormalized.size() > 0 && data.nameNormalized.size() <= 1500
+    && data.creatorUid is string && data.creatorUid.size() > 0 && data.creatorUid.size() <= 128
+    && data.creatorDisplayName is string && data.creatorDisplayName.size() <= 500
+    && data.createdAt is timestamp && data.updatedAt is timestamp;
+}
+match /retailers/{retailerId} {
+  allow read: if canUseOrders() && (isManager() || resource.data.active == true);
+  allow create: if canUseOrders() && validRetailer(request.resource.data)
+    && request.resource.data.active == true
+    && request.resource.data.creatorUid == request.auth.uid
+    && request.resource.data.creatorDisplayName == userDoc(request.auth.uid).data.displayName
+    && request.resource.data.createdAt == request.time
+    && request.resource.data.updatedAt == request.time;
+  allow update: if canUseOrders() && validRetailer(request.resource.data)
+    && (isManager() || (resource.data.active == true && request.resource.data.active == resource.data.active))
+    && request.resource.data.creatorUid == resource.data.creatorUid
+    && request.resource.data.creatorDisplayName == resource.data.creatorDisplayName
+    && request.resource.data.createdAt == resource.data.createdAt
+    && request.resource.data.schemaVersion == resource.data.schemaVersion
+    && request.resource.data.updatedAt == request.time;
+  allow delete: if false;
 }
 
 // Everything else denied.
