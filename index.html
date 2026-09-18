@@ -599,11 +599,13 @@ function Tag({ children, tone = "steel" }) {
   );
 }
 
-const ORDER_DRAFT_STORAGE_KEY = "haze-gray-cigars.order-draft.v1";
+const ORDER_DRAFT_STORAGE_KEY = "haze-gray-cigars.order-draft.v2.";
+const orderDraftKey = (uid) => uid ? ORDER_DRAFT_STORAGE_KEY + uid : null;
 
-function loadOrderDraft() {
+function loadOrderDraft(uid) {
+  if (!uid) return {};
   try {
-    const draft = JSON.parse(localStorage.getItem(ORDER_DRAFT_STORAGE_KEY));
+    const draft = JSON.parse(localStorage.getItem(orderDraftKey(uid)));
     if (!draft || typeof draft !== "object") return {};
     const orderItems = Array.isArray(draft.orderItems)
       ? draft.orderItems.filter((item) =>
@@ -998,26 +1000,13 @@ function HazeGrayReference() {
   const [showOrderBuilder, setShowOrderBuilder] = useState(false);
   const [showFinalReview, setShowFinalReview] = useState(false);
   const [showOrderHistory, setShowOrderHistory] = useState(false);
-  const [initialOrderDraft] = useState(loadOrderDraft);
-  const [orderItems, setOrderItems] = useState(initialOrderDraft.orderItems || []);
-  const [orderRetailer, setOrderRetailer] = useState(initialOrderDraft.orderRetailer || "");
-  const [orderEmail, setOrderEmail] = useState(initialOrderDraft.orderEmail || "");
-  const [orderNotes, setOrderNotes] = useState(initialOrderDraft.orderNotes || "");
+  const draftOwnerRef = useRef(null);
+  const [draftUid, setDraftUid] = useState(null);
+  const [orderItems, setOrderItems] = useState([]);
+  const [orderRetailer, setOrderRetailer] = useState("");
+  const [orderEmail, setOrderEmail] = useState("");
+  const [orderNotes, setOrderNotes] = useState("");
   const [copyConfirmed, setCopyConfirmed] = useState(false);
-
-  useEffect(() => {
-    try {
-      if (!orderItems.length && !orderRetailer && !orderEmail && !orderNotes) {
-        localStorage.removeItem(ORDER_DRAFT_STORAGE_KEY);
-      } else {
-        localStorage.setItem(ORDER_DRAFT_STORAGE_KEY, JSON.stringify({
-          orderItems, orderRetailer, orderEmail, orderNotes,
-        }));
-      }
-    } catch (e) {
-      // Keep the in-memory order usable when browser storage is unavailable or full.
-    }
-  }, [orderItems, orderRetailer, orderEmail, orderNotes]);
 
   const PACK_OPTIONS = [
   {
@@ -1132,7 +1121,7 @@ function HazeGrayReference() {
   const clearOrder = () => {
   if (!requirePermission("canUseOrderBuilder")) return;
   try {
-    localStorage.removeItem(ORDER_DRAFT_STORAGE_KEY);
+    localStorage.removeItem(orderDraftKey(draftOwnerRef.current));
   } catch (e) {
     // Clearing the in-memory order should still work if storage is unavailable.
   }
@@ -1300,6 +1289,24 @@ const openOrderFromCompare = (cigarId) => {
   const permissions = isAuthorizedUser ? getProfilePermissions(userProfile) : NO_PERMISSIONS;
   const { canEditCatalog, canEditPackages, canUseOrderBuilder, canUseFinalReview, canManageUsers, canMigrateLegacyData } = permissions;
   const activeDraft = { orderItems, orderRetailer, orderEmail, orderNotes };
+  const clearProtectedDraft = () => {
+    draftOwnerRef.current = null;
+    setDraftUid(null);
+    setOrderItems([]); setOrderRetailer(""); setOrderEmail(""); setOrderNotes("");
+    setShowOrderBuilder(false); setShowFinalReview(false); setShowOrderHistory(false);
+    setCompareOrderId(null); setCopyConfirmed(false);
+  };
+  useEffect(() => {
+    // Never persist a previous render's draft under a new account, or erase it during cleanup.
+    if (!draftUid || draftOwnerRef.current !== draftUid || auth.currentUser?.uid !== draftUid ||
+        accessRef.current.uid !== draftUid || !accessRef.current.permissions.canUseOrderBuilder) return;
+    try {
+      const key = orderDraftKey(draftUid);
+      if (!orderItems.length && !orderRetailer && !orderEmail && !orderNotes) localStorage.removeItem(key);
+      else localStorage.setItem(key, JSON.stringify({ orderItems, orderRetailer, orderEmail, orderNotes }));
+    } catch { /* Keep the in-memory order usable when storage is unavailable. */ }
+  }, [draftUid, orderItems, orderRetailer, orderEmail, orderNotes]);
+
   useEffect(() => { if (!canUseOrderBuilder) setShowOrderHistory(false); }, [canUseOrderBuilder, user?.uid]);
   // Read current access inside handlers, including async continuations and stale callbacks.
   const requirePermission = useCallback((permission) => {
@@ -1314,6 +1321,7 @@ const openOrderFromCompare = (cigarId) => {
     let generation = 0;
     const unsub = onAuthStateChanged(auth, (u) => {
       const currentGeneration = ++generation;
+      clearProtectedDraft();
       if (unsubscribeProfile) unsubscribeProfile();
       unsubscribeProfile = null;
       accessRef.current = { uid: u?.uid || null, profile: null, permissions: NO_PERMISSIONS };
@@ -1333,12 +1341,23 @@ const openOrderFromCompare = (cigarId) => {
         if (currentGeneration !== generation) return;
         const profile = snap.exists() ? snap.data() : null;
         accessRef.current = { uid: u.uid, profile, permissions: getProfilePermissions(profile) };
+        if (!accessRef.current.permissions.canUseOrderBuilder) clearProtectedDraft();
+        else if (draftOwnerRef.current !== u.uid) {
+          const restored = loadOrderDraft(u.uid);
+          draftOwnerRef.current = u.uid;
+          setDraftUid(u.uid);
+          setOrderItems(restored.orderItems || []);
+          setOrderRetailer(restored.orderRetailer || "");
+          setOrderEmail(restored.orderEmail || "");
+          setOrderNotes(restored.orderNotes || "");
+        }
         setUserProfile(profile);
         setProfileReady(true);
         setProfileError("");
       }, (e) => {
         if (currentGeneration !== generation) return;
         accessRef.current = { uid: u.uid, profile: null, permissions: NO_PERMISSIONS };
+        clearProtectedDraft();
         setUserProfile(null);
         setProfileReady(true);
         setProfileError("Could not load your authorization profile. (" + e.message + ")");
