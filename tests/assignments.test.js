@@ -1,0 +1,95 @@
+const {test}=require('node:test');
+const assert=require('node:assert/strict');
+const fs=require('node:fs');
+const {loadClient}=require('./client-helpers.cjs');
+const client=loadClient();
+const source=fs.readFileSync('index.html','utf8').match(/<script type="text\/babel"[^>]*>([\s\S]*?)<\/script>/)[1];
+const parser=require('@babel/parser'),traverse=require('@babel/traverse').default;
+const ast=parser.parse(source,{sourceType:'module',plugins:['jsx']});
+const nodes={};traverse(ast,{FunctionDeclaration(p){nodes[p.node.id.name]=p.node;},VariableDeclarator(p){if(p.getFunctionParent()?.node.id?.name==='RetailerDirectory')nodes[p.node.id.name]=p.node.init;}});
+const text=name=>source.slice(nodes[name].start,nodes[name].end);
+
+test('assignment lists support legacy, shared ownership, removals and bounded UID strings',()=>{
+ assert.deepEqual(client.retailerAssignments({}),[]);
+ const list=['rep-a','rep-b'];assert.deepEqual(client.validateRepAssignments(list),list);
+ assert.notEqual(client.validateRepAssignments(list),list);
+ assert.deepEqual(client.validateRepAssignments([]),[]);
+ assert.equal(client.validateRepAssignments(Array.from({length:10},(_,i)=>'rep-'+i)).length,10);
+ for(const value of [null,'uid',{},[3],[''],['a/b'],['x'.repeat(129)],['a','a'],Array.from({length:11},(_,i)=>'r'+i)])assert.throws(()=>client.validateRepAssignments(value));
+});
+
+test('assignment names/status are manager-only; reps receive anonymous labels',()=>{
+ const profiles=[{uid:'a',displayName:'Alice',role:'field_rep',active:true},{uid:'b',displayName:'Bob',role:'field_rep',active:false},{uid:'c',displayName:'Carol',role:'admin',active:true}];
+ assert.equal(client.assignedRepLabel('a','a',true,profiles),'Alice');
+ assert.match(client.assignedRepLabel('b','a',true,profiles),/Bob.*Former \/ inactive rep/);
+ assert.match(client.assignedRepLabel('c','a',true,profiles),/Carol.*Former \/ inactive rep/);
+ assert.equal(client.assignedRepLabel('missing','a',true,profiles),'Unavailable user');
+ assert.equal(client.assignedRepLabel('a','a',false,profiles),'You');
+ assert.equal(client.assignedRepLabel('b','a',false,profiles),'Other assigned rep');
+ assert.equal(client.assignmentSummary({},'a',false,profiles),'Unassigned');
+ assert.equal(client.assignmentSummary({assignedRepUids:['a','b']},'a',false,profiles),'Assigned (2): You, Other assigned rep');
+ assert.equal(client.assignmentSummary({assignedRepUids:['a','b','c']},'a',true,profiles,true),'Assigned (3): Alice +2');
+ assert.match(client.assignmentSummary({assignedRepUids:['a','b','c']},'a',true,profiles),/Carol/);
+ assert.deepEqual(profiles.filter(client.isAssignableRep).map(p=>p.uid),['a']);
+});
+
+test('My/All/Assigned/Unassigned/rep filters preserve the shared dataset and search',()=>{
+ const records=[{id:'legacy',name:'Legacy'},{id:'empty',assignedRepUids:[]},{id:'mine',assignedRepUids:['a','b'],city:'Esteli',state:'OK'},{id:'other',assignedRepUids:['b']}];
+ const ids=filter=>client.filterRetailerAssignments(records,filter,'a').map(r=>r.id);
+ assert.deepEqual(ids('mine'),['mine']);assert.deepEqual(ids('all'),records.map(r=>r.id));
+ assert.deepEqual(ids('assigned'),['mine','other']);assert.deepEqual(ids('unassigned'),['legacy','empty']);
+ assert.deepEqual(ids('rep:b'),['mine','other']);assert.equal(records.length,4);
+ assert(client.retailerSearch(client.filterRetailerAssignments(records,'mine','a')[0],' esteli, ok '));
+ const defaultFilter=Function('assignmentFilter','permissions','hasMine','return '+text('activeFilter'));
+ assert.equal(defaultFilter('',{canFilterOwnRetailers:true},true),'mine');
+ assert.equal(defaultFilter('',{canFilterOwnRetailers:true},false),'all');
+ assert.equal(defaultFilter('all',{canFilterOwnRetailers:true},true),'all');
+ assert.equal(defaultFilter('',{canFilterOwnRetailers:false},true),'all');
+ assert.match(text('RetailerDirectory'),/No retailers are currently assigned to you/);
+ for(const role of ['owner','admin'])assert(client.getProfilePermissions({role,active:true}).canAssignRetailers);
+ assert(client.getProfilePermissions({role:'field_rep',active:true}).canFilterOwnRetailers);
+ for(const role of ['field_rep','viewer','unknown'])assert(!client.getProfilePermissions({role,active:true}).canAssignRetailers);
+ for(const role of ['owner','admin','viewer'])assert(!client.getProfilePermissions({role,active:true}).canFilterOwnRetailers);
+ assert(!client.getProfilePermissions({role:'owner',active:false}).canAssignRetailers);
+});
+
+test('profile listener never starts for Field Reps and clears across accounts, role loss and failures',()=>{
+ let state,cleanup,callback,failure,subscriptions=0,stops=0;
+ const auth={currentUser:{uid:'owner'}};
+ const env={auth,db:{},collection:()=>({}),
+ useState:initial=>typeof initial==='number'?[0,()=>{}]:[state===undefined?initial:state,value=>state=value],
+ useEffect:effect=>{cleanup=effect();},
+ onSnapshot:(_ref,next,error)=>{subscriptions++;callback=next;failure=error;return ()=>stops++;}};
+ const ui=loadClient(env);
+ assert.deepEqual(ui.useAssignmentProfiles({uid:'owner'},false).profiles,[]);assert.equal(subscriptions,0);cleanup();
+ ui.useAssignmentProfiles({uid:'owner'},true);callback({docs:[{id:'a',data:()=>({displayName:'Alice',role:'field_rep',active:true})}]});assert.equal(state.profiles.length,1);
+ const old=callback;cleanup();auth.currentUser={uid:'admin'};
+ assert.deepEqual(ui.useAssignmentProfiles({uid:'admin'},true).profiles,[]);
+ old({docs:[{id:'secret',data:()=>({displayName:'old'})}]});assert.deepEqual(state.profiles,[]);
+ callback({docs:[{id:'b',data:()=>({displayName:'Bob'})}]});assert.equal(state.profiles[0].uid,'b');
+ failure(new Error('permission denied'));assert.deepEqual(state.profiles,[]);assert.match(state.error,/Could not load rep profiles/);
+ cleanup();auth.currentUser={uid:'rep'};assert.deepEqual(ui.useAssignmentProfiles({uid:'rep'},false).profiles,[]);assert.equal(subscriptions,2);
+ cleanup();auth.currentUser=null;assert.deepEqual(ui.useAssignmentProfiles(null,false).profiles,[]);assert.equal(stops,2);
+ assert.match(text('RetailerDirectory'),/useAssignmentProfiles\(user, permissions.canAssignRetailers\)/);
+ assert.match(text('RetailerDirectory'),/editingAssignments && selected && permissions.canAssignRetailers/);
+});
+
+test('save handler requires manager role, checks newly assigned active reps and preserves stale UIDs',async()=>{
+ let role='owner',active=true,current=['stale'],writes=[],reads=[];
+ const profiles={a:{role:'field_rep',active:true},b:{role:'field_rep',active:true},stale:{role:'viewer',active:true},inactive:{role:'field_rep',active:false}};
+ const auth={currentUser:{uid:'manager'}};
+ const transaction={get:async ref=>{reads.push(ref);const data=ref==='users/manager'?{role,active}:ref==='retailers/r'?{assignedRepUids:current,name:'Keep business fields'}:profiles[ref.slice(6)];return {exists:()=>!!data,data:()=>data};},update:(ref,data)=>writes.push({ref,data})};
+ const ui=loadClient({auth,db:{},doc:(_db,col,id)=>col+'/'+id,runTransaction:async(_db,fn)=>fn(transaction),serverTimestamp:()=> 'server-time'});
+ for(const managerRole of ['owner','admin']){
+  role=managerRole;writes=[];reads=[];await ui.saveRetailerAssignments('r',['stale','a','b'],['stale'],'manager',()=>true);
+  assert.equal(writes.length,1);assert.deepEqual(writes[0].data,{assignedRepUids:['stale','a','b'],updatedAt:'server-time'});assert(!reads.includes('users/stale'));
+ }
+ for(const next of [['a'],[]]){writes=[];await ui.saveRetailerAssignments('r',next,['stale'],'manager',()=>true);assert.deepEqual(writes[0].data.assignedRepUids,next);}
+ for(const next of [['inactive'],['missing']]){writes=[];await assert.rejects(ui.saveRetailerAssignments('r',next,['stale'],'manager',()=>true),/active Field Rep/);assert.equal(writes.length,0);}
+ current=[];await assert.rejects(ui.saveRetailerAssignments('r',['stale'],[],'manager',()=>true),/active Field Rep/);
+ await assert.rejects(ui.saveRetailerAssignments('r',['a'],['stale'],'manager',()=>true),/Assignments changed/);
+ for(const deniedRole of ['field_rep','viewer','unknown']){role=deniedRole;writes=[];await assert.rejects(ui.saveRetailerAssignments('r',['a'],[],'manager',()=>true),/not authorized/);assert.equal(writes.length,0);}
+ role='owner';active=false;await assert.rejects(ui.saveRetailerAssignments('r',[],[],'manager',()=>true),/not authorized/);
+ active=true;await assert.rejects(ui.saveRetailerAssignments('r',[],[],'manager',()=>false),/not authorized/);
+ auth.currentUser=null;await assert.rejects(ui.saveRetailerAssignments('r',[],[],'manager',()=>true),/not authorized/);
+});

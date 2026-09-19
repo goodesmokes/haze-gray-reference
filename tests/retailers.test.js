@@ -83,14 +83,14 @@ test('directory subscriptions fail closed across account, role changes and error
  fail(new Error('denied'));assert.deepEqual(state.records,[]);assert.match(state.error,/denied/);
  cleanup();auth.currentUser=null;hook(null,null,false);assert.deepEqual(state.records,[]);assert.equal(stopped,2);
 });
-test('existing rules change only by adding retailers and optional order retailerId',()=>{
+test('retailer assignment is the only rules change; orders/users/catalog remain exact',()=>{
  const current=fs.readFileSync('firestore.rules','utf8').replace(/\r\n/g,'\n');
  const old=cp.execFileSync('git',['show','HEAD:firestore.rules'],{encoding:'utf8'}).replace(/\r\n/g,'\n');
- if(old.includes('match /retailers/')) { assert.equal(current,old); return; }
- const restored=current.replace(/\/\/ -------------------------------\n\/\/ SHARED RETAILER DIRECTORY[\s\S]*?(?=\/\/ Everything else denied\.)/,'')
- .replace("hasOnly(['retailerId', 'schemaVersion', 'status'","hasOnly(['schemaVersion', 'status'")
- .split('\n').filter(line=>!line.includes("!('retailerId' in request.resource.data)")).join('\n');
- assert.equal(restored,old);
+ const withoutAssignments=value=>value
+ .replace(/\/\/ Optional assignment metadata[\s\S]*?(?=function validRetailer)/,'')
+ .replace("hasOnly(['assignedRepUids', 'schemaVersion'", "hasOnly(['schemaVersion'")
+ .split('\n').filter(line=>!line.includes('&& validRepAssignments(data)') && !line.includes("&& (isManager() || !('assignedRepUids'") && !line.includes("&& (isManager() || !request.resource.data.diff(resource.data)" )).join('\n');
+ assert.equal(withoutAssignments(current),withoutAssignments(old));
 });
 
 test('US phone formats raw, punctuated, country-code and progressive values',()=>{

@@ -111,6 +111,78 @@ test('Spark browser SDK and Auth/Firestore rules', { skip: !enabled, timeout: 12
       const ownerOrder=reference(owner);await write(owner,{...make(owner),retailerId:'linked-retailer'},ownerOrder);
       await denied(sdk.getDocFromServer(sdk.doc(rep.db,'orders',ownerOrder.id)));
     });
+    await t.test('assignment rules: legacy compatibility, shared access, manager assignment and immutable rep assignments',async()=>{
+      const form={...Object.fromEntries(Object.keys(rep.client.RETAILER_FIELDS).map(key=>[key,''])),name:'Assignment legacy '+Date.now(),active:true};
+      const data={...owner.client.validateRetailer(form),schemaVersion:1,creatorUid:owner.uid,creatorDisplayName:owner.profile.displayName,createdAt:sdk.serverTimestamp(),updatedAt:sdk.serverTimestamp()};
+      const ref=sdk.doc(sdk.collection(owner.db,'retailers'));await sdk.setDoc(ref,data);
+      const repRef=sdk.doc(rep.db,'retailers',ref.id),adminRef=sdk.doc(admin.db,'retailers',ref.id);
+      assert.deepEqual(rep.client.retailerAssignments((await sdk.getDocFromServer(repRef)).data()),[]);
+      await sdk.updateDoc(repRef,{city:'Shared City',updatedAt:sdk.serverTimestamp()});
+      assert(!Object.hasOwn((await sdk.getDocFromServer(ref)).data(),'assignedRepUids'));
+      await denied(sdk.updateDoc(repRef,{assignedRepUids:[],updatedAt:sdk.serverTimestamp()}));
+      for(const managerRef of [ref,adminRef]){
+        await sdk.updateDoc(managerRef,{assignedRepUids:[rep.uid,'rep-b'],updatedAt:sdk.serverTimestamp()});
+        await sdk.updateDoc(managerRef,{assignedRepUids:['rep-b'],updatedAt:sdk.serverTimestamp()});
+        await sdk.updateDoc(managerRef,{assignedRepUids:[],updatedAt:sdk.serverTimestamp()});
+      }
+      await sdk.updateDoc(ref,{assignedRepUids:['rep-b'],updatedAt:sdk.serverTimestamp()});
+      assert((await sdk.getDocFromServer(repRef)).exists()); // Not assigned to this rep: still shared.
+      await sdk.updateDoc(repRef,{phone:'555',assignedRepUids:['rep-b'],updatedAt:sdk.serverTimestamp()});
+      for(const assignedRepUids of [[],[rep.uid],['rep-b',rep.uid],['spoof'],sdk.deleteField()])await denied(sdk.updateDoc(repRef,{assignedRepUids,updatedAt:sdk.serverTimestamp()}));
+      await denied(sdk.getDocFromServer(sdk.doc(actor('viewer').db,'retailers',ref.id)));
+      for(const managerRef of [ref,adminRef])await denied(sdk.deleteDoc(managerRef));
+      await denied(sdk.getDocFromServer(sdk.doc(rep.db,'users',owner.uid)));
+      await denied(sdk.getDocsFromServer(sdk.collection(rep.db,'users')));
+      assert((await sdk.getDocFromServer(sdk.doc(rep.db,'users',rep.uid))).exists());
+      assert((await sdk.getDocsFromServer(sdk.collection(admin.db,'users'))).size>0);
+    });
+    await t.test('assignment rules validate all ten UID slots, exact fields, duplicates and create restrictions',async()=>{
+      const form={...Object.fromEntries(Object.keys(rep.client.RETAILER_FIELDS).map(key=>[key,''])),name:'Assignment bounds '+Date.now(),active:true};
+      const create=(a,assignedRepUids)=>sdk.setDoc(sdk.doc(sdk.collection(a.db,'retailers')),{...a.client.validateRetailer(form),schemaVersion:1,creatorUid:a.uid,creatorDisplayName:a.profile.displayName,createdAt:sdk.serverTimestamp(),updatedAt:sdk.serverTimestamp(),assignedRepUids});
+      for(const a of [owner,admin])for(const assigned of [[],[rep.uid],[rep.uid,'rep-b']])await create(a,assigned);
+      await create(rep,[]);await denied(create(rep,[rep.uid]));await denied(create(rep,['rep-b']));
+      for(const a of actors.filter(a=>!allowed.includes(a)))await denied(create(a,[]));
+      const ten=Array.from({length:10},(_,i)=>'rep-'+i);await create(owner,ten);
+      const maximumRef=sdk.doc(sdk.collection(owner.db,'retailers'));
+      await sdk.setDoc(maximumRef,{...owner.client.validateRetailer(form),schemaVersion:1,creatorUid:owner.uid,creatorDisplayName:owner.profile.displayName,createdAt:sdk.serverTimestamp(),updatedAt:sdk.serverTimestamp(),assignedRepUids:[]});
+      await sdk.updateDoc(maximumRef,{assignedRepUids:ten,updatedAt:sdk.serverTimestamp()});
+      await sdk.updateDoc(sdk.doc(admin.db,'retailers',maximumRef.id),{assignedRepUids:[...ten].reverse(),updatedAt:sdk.serverTimestamp()});
+      await sdk.updateDoc(sdk.doc(rep.db,'retailers',maximumRef.id),{city:'Shared maximum',updatedAt:sdk.serverTimestamp()});
+      assert.equal((await sdk.getDocFromServer(maximumRef)).data().assignedRepUids.length,10);
+      for(const invalid of [null,'uid',{},[''],['a/b'],['x'.repeat(129)],['a','a'],[...ten,'eleventh']])await denied(create(owner,invalid));
+      for(let i=0;i<10;i++){const invalid=[...ten];invalid[i]=42;await denied(create(owner,invalid));}
+    });
+    await t.test('assignment client saves recheck profiles, preserve stale reps, reject conflicts and keep contact edits separate',async()=>{
+      const repB='assignment-rep-b-'+Date.now();
+      const profileB={displayName:'Rep B',email:'b@example.test',territory:'Test',role:'field_rep',active:true};await seed('/users/'+repB,profileB);
+      const form={...Object.fromEntries(Object.keys(rep.client.RETAILER_FIELDS).map(key=>[key,''])),name:'Assignment client '+Date.now(),active:true};
+      const id=await owner.client.saveRetailerProfile(null,{...form,assignedRepUids:[rep.uid,repB]},owner.uid,()=>true);
+      const ref=sdk.doc(owner.db,'retailers',id);
+      assert.deepEqual((await sdk.getDocFromServer(ref)).data().assignedRepUids,[rep.uid,repB]);
+      await admin.client.saveRetailerAssignments(id,[repB],[rep.uid,repB],admin.uid,()=>true);
+      await seed('/users/'+repB,{...profileB,active:false});
+      await owner.client.saveRetailerAssignments(id,[repB,rep.uid],[repB],owner.uid,()=>true);
+      await rep.client.saveRetailerProfile(id,{...form,city:'Contact edit'},rep.uid,()=>true);
+      assert.deepEqual((await sdk.getDocFromServer(ref)).data().assignedRepUids,[repB,rep.uid]);
+      await assert.rejects(rep.client.saveRetailerAssignments(id,[],[repB,rep.uid],rep.uid,()=>true),/not authorized/);
+      await assert.rejects(rep.client.saveRetailerProfile(id,{...form,assignedRepUids:[]},rep.uid,()=>true),/Assigned Reps/);
+      await assert.rejects(owner.client.saveRetailerAssignments(id,[],[],owner.uid,()=>true),/Assignments changed/);
+      await owner.client.saveRetailerAssignments(id,[],[repB,rep.uid],owner.uid,()=>true);
+      await assert.rejects(owner.client.saveRetailerAssignments(id,[repB],[],owner.uid,()=>true),/active Field Rep/);
+      await seed('/users/'+repB,{...profileB,role:'viewer'});
+      await assert.rejects(admin.client.saveRetailerAssignments(id,[repB],[],admin.uid,()=>true),/active Field Rep/);
+      await assert.rejects(admin.client.saveRetailerAssignments(id,['nonexistent-user'],[],admin.uid,()=>true),/active Field Rep/);
+      assert.deepEqual((await sdk.getDocFromServer(ref)).data().assignedRepUids,[]);
+      const tenProfiles=Array.from({length:10},(_,i)=>'assignment-ten-'+Date.now()+'-'+i);
+      for(const uid of tenProfiles)await seed('/users/'+uid,{...profileB,displayName:'Boundary Rep'});
+      await admin.client.saveRetailerAssignments(id,tenProfiles,[],admin.uid,()=>true);
+      await owner.client.saveRetailerAssignments(id,[],tenProfiles,owner.uid,()=>true);
+      const repId=await rep.client.saveRetailerProfile(null,{...form,name:form.name+' Rep'},rep.uid,()=>true);
+      assert.deepEqual((await sdk.getDocFromServer(sdk.doc(rep.db,'retailers',repId))).data().assignedRepUids,[]);
+      await assert.rejects(rep.client.saveRetailerProfile(null,{...form,name:form.name+' Spoof',assignedRepUids:[rep.uid]},rep.uid,()=>true),/not authorized/);
+      const adminId=await admin.client.saveRetailerProfile(null,{...form,name:form.name+' Admin',assignedRepUids:[rep.uid]},admin.uid,()=>true);
+      assert.deepEqual((await sdk.getDocFromServer(sdk.doc(admin.db,'retailers',adminId))).data().assignedRepUids,[rep.uid]);
+    });
     await t.test('profile revocation and sign-out deny fresh reads and writes',async()=>{
       await seed('/users/'+rep.uid,{...rep.profile,active:false});await denied(write(rep,make(rep)));await denied(sdk.getDocFromServer(sdk.doc(rep.db,'orders',savedRefs.get('field_rep'))));
       await authSdk.signOut(owner.auth);await denied(write(owner,make(owner)));await denied(sdk.getDocFromServer(sdk.doc(owner.db,'orders',savedRefs.get('owner'))));

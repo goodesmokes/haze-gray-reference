@@ -51,12 +51,12 @@ const ROLE_LABELS = Object.freeze({ owner: "Owner", admin: "Admin", field_rep: "
 const NO_PERMISSIONS = Object.freeze({
   canEditCatalog: false, canEditPackages: false, canUseOrderBuilder: false,
   canUseFinalReview: false, canManageUsers: false, canMigrateLegacyData: false,
-  canManageOwners: false, canUseRetailers: false, canChangeRetailerStatus: false,
+  canManageOwners: false, canUseRetailers: false, canChangeRetailerStatus: false, canAssignRetailers: false, canFilterOwnRetailers: false,
 });
 const ROLE_PERMISSIONS = Object.freeze({
-  owner: Object.freeze({ ...NO_PERMISSIONS, canEditCatalog: true, canEditPackages: true, canUseOrderBuilder: true, canUseFinalReview: true, canManageUsers: true, canUseRetailers: true, canChangeRetailerStatus: true, canMigrateLegacyData: true, canManageOwners: true }),
-  admin: Object.freeze({ ...NO_PERMISSIONS, canEditCatalog: true, canEditPackages: true, canUseOrderBuilder: true, canUseFinalReview: true, canManageUsers: true, canUseRetailers: true, canChangeRetailerStatus: true }),
-  field_rep: Object.freeze({ ...NO_PERMISSIONS, canUseOrderBuilder: true, canUseFinalReview: true, canUseRetailers: true }),
+  owner: Object.freeze({ ...NO_PERMISSIONS, canEditCatalog: true, canEditPackages: true, canUseOrderBuilder: true, canUseFinalReview: true, canManageUsers: true, canUseRetailers: true, canChangeRetailerStatus: true, canAssignRetailers: true, canMigrateLegacyData: true, canManageOwners: true }),
+  admin: Object.freeze({ ...NO_PERMISSIONS, canEditCatalog: true, canEditPackages: true, canUseOrderBuilder: true, canUseFinalReview: true, canManageUsers: true, canUseRetailers: true, canChangeRetailerStatus: true, canAssignRetailers: true }),
+  field_rep: Object.freeze({ ...NO_PERMISSIONS, canUseOrderBuilder: true, canUseFinalReview: true, canUseRetailers: true, canFilterOwnRetailers: true }),
   viewer: NO_PERMISSIONS,
 });
 const isValidRole = (role) => typeof role === "string" && Object.prototype.hasOwnProperty.call(ROLE_PERMISSIONS, role);
@@ -937,6 +937,111 @@ function RetailerPhoneInput({ value, country, disabled, onChange }) {
     onBlur: (event) => onChange(formatRetailerPhone(event.target.value, country))
   });
 }
+const retailerAssignments = (retailer) => Array.isArray(retailer?.assignedRepUids) ? retailer.assignedRepUids : [];
+const isAssignableRep = (profile) => profile?.active === true && profile.role === "field_rep";
+function validateRepAssignments(uids) {
+  if (!Array.isArray(uids) || uids.length > 10 || new Set(uids).size !== uids.length || uids.some((uid) => typeof uid !== "string" || !uid.length || uid.length > 128 || uid.includes("/"))) throw new Error("Choose up to 10 different Field Reps.");
+  return [...uids];
+}
+function assignedRepLabel(uid, currentUid, canResolve, profiles) {
+  if (!canResolve) return uid === currentUid ? "You" : "Other assigned rep";
+  const profile = profiles.find((item) => item.uid === uid);
+  if (!profile) return "Unavailable user";
+  const name = profile.displayName || "Unnamed user";
+  return isAssignableRep(profile) ? name : name + " — Former / inactive rep";
+}
+function assignmentSummary(retailer, uid, canResolve, profiles, compact = false) {
+  const assigned = retailerAssignments(retailer);
+  if (!assigned.length) return "Unassigned";
+  const labels = assigned.map((id) => assignedRepLabel(id, uid, canResolve, profiles));
+  return "Assigned (" + assigned.length + "): " + (compact && labels.length > 2 ? labels[0] + " +" + (labels.length - 1) : labels.join(", "));
+}
+function filterRetailerAssignments(records, filter, uid) {
+  return records.filter((retailer) => {
+    const assigned = retailerAssignments(retailer);
+    if (filter === "mine") return assigned.includes(uid);
+    if (filter === "assigned") return assigned.length > 0;
+    if (filter === "unassigned") return assigned.length === 0;
+    if (filter.startsWith("rep:")) return assigned.includes(filter.slice(4));
+    return true;
+  });
+}
+function useAssignmentProfiles(user, enabled) {
+  const scope = enabled ? user.uid : "";
+  const [state, setState] = useState({ scope: "", profiles: [], ready: false, error: "" });
+  const [retry, setRetry] = useState(0);
+  useEffect(() => {
+    let live = true;
+    setState({ scope, profiles: [], ready: false, error: "" });
+    if (!scope) return () => { live = false; };
+    const stop = onSnapshot(collection(db, "users"), (snapshot) => {
+      if (!live || auth.currentUser?.uid !== scope) return;
+      const profiles = snapshot.docs.map((item) => ({ ...item.data(), uid: item.id }));
+      profiles.sort((a, b) => String(a.displayName || a.uid).localeCompare(String(b.displayName || b.uid)));
+      setState({ scope, profiles, ready: true, error: "" });
+    }, (error) => { if (live && auth.currentUser?.uid === scope) setState({ scope, profiles: [], ready: true, error: "Could not load rep profiles: " + error.message }); });
+    return () => { live = false; stop(); };
+  }, [scope, retry]);
+  return { ...(scope && state.scope === scope ? state : { profiles: [], ready: false, error: "" }), reload: () => setRetry((value) => value + 1) };
+}
+async function checkNewRepAssignments(transaction, next, previous) {
+  validateRepAssignments(next);
+  for (const uid of next.filter((id) => !previous.includes(id))) {
+    const profile = await transaction.get(doc(db, "users", uid));
+    if (!profile.exists() || !isAssignableRep(profile.data())) throw new Error("A selected user is no longer an active Field Rep. Reopen assignment controls and try again.");
+  }
+}
+async function saveRetailerAssignments(id, next, expected, uid, requirePermission) {
+  const permitted = () => auth.currentUser?.uid === uid && requirePermission("canAssignRetailers");
+  if (!permitted()) throw new Error("You are not authorized to change retailer assignments.");
+  validateRepAssignments(next);
+  await runTransaction(db, async (transaction) => {
+    const profile = await transaction.get(doc(db, "users", uid));
+    if (!permitted() || !getProfilePermissions(profile.exists() ? profile.data() : null).canAssignRetailers) throw new Error("You are not authorized to change retailer assignments.");
+    const ref = doc(db, "retailers", id), snapshot = await transaction.get(ref);
+    if (!snapshot.exists()) throw new Error("This retailer no longer exists.");
+    const previous = retailerAssignments(snapshot.data());
+    if (JSON.stringify(previous) !== JSON.stringify(expected)) throw new Error("Assignments changed while you were editing. Close and reopen to review the latest assignments.");
+    await checkNewRepAssignments(transaction, next, previous);
+    if (!permitted()) throw new Error("Your retailer assignment access changed.");
+    transaction.update(ref, { assignedRepUids: next, updatedAt: serverTimestamp() });
+  });
+}
+function RepAssignmentChoices({ value, onChange, repDirectory, disabled }) {
+  const choices = repDirectory.profiles.filter((profile) => isAssignableRep(profile) || value.includes(profile.uid));
+  const missing = value.filter((uid) => !choices.some((profile) => profile.uid === uid));
+  return <fieldset disabled={disabled} style={{ border: "1px solid #555", padding: 12, margin: "16px 0", overflowWrap: "anywhere" }}>
+    <legend>Assigned Reps ({value.length}/10)</legend>
+    {!value.length && <p>Unassigned</p>}
+    {!repDirectory.ready && <p>Loading rep profiles…</p>}
+    {repDirectory.error && <p role="alert">{repDirectory.error} <button type="button" className="hg-btn" style={userButtonStyle} onClick={repDirectory.reload}>Retry</button></p>}
+    {repDirectory.ready && !repDirectory.error && !repDirectory.profiles.some(isAssignableRep) && <p>No active Field Reps are available.</p>}
+    {[...choices.map((profile) => profile.uid), ...missing].map((uid) => <label key={uid} style={{ display: "block", margin: "8px 0" }}><input type="checkbox" checked={value.includes(uid)} disabled={!value.includes(uid) && (!repDirectory.ready || Boolean(repDirectory.error) || value.length >= 10)} onChange={(event) => onChange(event.target.checked ? [...value, uid] : value.filter((id) => id !== uid))} /> {assignedRepLabel(uid, "", true, repDirectory.profiles)}</label>)}
+    <p style={{ color: "#8A93A0", marginBottom: 0 }}>Assignments indicate responsibility. All active retailers remain shared.</p>
+  </fieldset>;
+}
+function RetailerAssignmentEditor({ retailer, user, repDirectory, requirePermission, onClose }) {
+  const [expected] = useState(() => [...retailerAssignments(retailer)]);
+  const [value, setValue] = useState(expected);
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const busy = useRef(false), mounted = useRef(true);
+  useEffect(() => () => { mounted.current = false; }, []);
+  const submit = async (event) => {
+    event.preventDefault();
+    if (busy.current) return;
+    busy.current = true; setSaving(true); setError("");
+    try { await saveRetailerAssignments(retailer.id, value, expected, user.uid, requirePermission); if (mounted.current) onClose(); }
+    catch (failure) { if (mounted.current) setError(failure.message); }
+    finally { busy.current = false; if (mounted.current) setSaving(false); }
+  };
+  return <div role="dialog" aria-modal="true" aria-label="Edit Assigned Reps" style={{ position: "fixed", inset: 0, zIndex: 66, background: "rgba(0,0,0,0.7)", display: "grid", placeItems: "center", padding: 16 }}><form onSubmit={submit} className="hg-scroll" style={{ background: "#1c1f24", border: "1px solid #B8894C", borderRadius: 8, padding: 20, width: "100%", boxSizing: "border-box", maxWidth: 640, maxHeight: "85vh", overflowY: "auto" }}>
+    <h2>Assigned Reps — {retailer.name}</h2>
+    <RepAssignmentChoices value={value} onChange={setValue} repDirectory={repDirectory} disabled={saving} />
+    {error && <p role="alert" style={{ color: "#d98a7c" }}>{error}</p>}
+    <button className="hg-btn" style={userButtonStyle} disabled={saving}>{saving ? "Saving…" : "Save Assignments"}</button> <button type="button" className="hg-btn" style={userButtonStyle} onClick={onClose}>Cancel</button>
+  </form></div>;
+}
 function validateRetailer(input) {
   const result = {};
   for (const key of Object.keys(RETAILER_FIELDS)) {
@@ -957,6 +1062,7 @@ async function saveRetailerProfile(id, input, uid, requirePermission) {
   const permitted = () => auth.currentUser?.uid === uid && requirePermission("canUseRetailers");
   if (!permitted()) throw new Error("You are not authorized to manage retailers.");
   const data = validateRetailer(input);
+  if (id && Object.prototype.hasOwnProperty.call(input, "assignedRepUids")) throw new Error("Use Assigned Reps to change retailer assignments.");
   if (!id) {
     // Advisory duplicate check, not a global uniqueness guarantee across simultaneous clients.
     const existing = await getDocs(query(collection(db, "retailers"), where("active", "==", true)));
@@ -977,7 +1083,11 @@ async function saveRetailerProfile(id, input, uid, requirePermission) {
       transaction.update(ref, { ...data, updatedAt: serverTimestamp() });
     } else {
       if (!data.active) throw new Error("New retailers must be active.");
-      transaction.set(ref, { ...data, schemaVersion: 1, creatorUid: uid, creatorDisplayName: profile.data().displayName, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+      const assignments = input.assignedRepUids === undefined ? [] : validateRepAssignments(input.assignedRepUids);
+      if (!permissions.canAssignRetailers && Object.prototype.hasOwnProperty.call(input, "assignedRepUids")) throw new Error("You are not authorized to choose retailer assignments.");
+      if (permissions.canAssignRetailers) await checkNewRepAssignments(transaction, assignments, []);
+      if (!permitted()) throw new Error("Your retailer access changed.");
+      transaction.set(ref, { ...data, assignedRepUids: assignments, schemaVersion: 1, creatorUid: uid, creatorDisplayName: profile.data().displayName, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
     }
   });
   return ref.id;
@@ -1002,10 +1112,11 @@ function useRetailerDirectory(user, profile, enabled) {
   }, [scope, retry]);
   return { ...(state.scope === scope ? state : { records: [], ready: false, error: "" }), reload: () => setRetry((value) => value + 1) };
 }
-function RetailerEditor({ retailer, currentUid, canChangeStatus, requirePermission, onClose, onSaved, onOpenExisting }) {
+function RetailerEditor({ retailer, currentUid, canChangeStatus, canAssign, repDirectory, requirePermission, onClose, onSaved, onOpenExisting }) {
   const [form, setForm] = useState(() => ({ ...Object.fromEntries(Object.keys(RETAILER_FIELDS).map((key) => [key, retailer?.[key] || (key === "country" ? "United States" : "")])), phone: formatRetailerPhone(retailer?.phone || "", retailer?.country || ""), active: retailer?.active ?? true }));
   const [error, setError] = useState("");
   const [duplicateId, setDuplicateId] = useState(null);
+  const [assignments, setAssignments] = useState([]);
   const [saving, setSaving] = useState(false);
   const mounted = useRef(true);
   const busy = useRef(false);
@@ -1015,7 +1126,7 @@ function RetailerEditor({ retailer, currentUid, canChangeStatus, requirePermissi
     if (busy.current || !requirePermission("canUseRetailers")) return;
     busy.current = true; setSaving(true); setError(""); setDuplicateId(null);
     try {
-      const id = await saveRetailerProfile(retailer?.id, form, currentUid, requirePermission);
+      const id = await saveRetailerProfile(retailer?.id, !retailer && canAssign ? { ...form, assignedRepUids: assignments } : form, currentUid, requirePermission);
       if (mounted.current && auth.currentUser?.uid === currentUid && requirePermission("canUseRetailers")) onSaved(id);
     } catch (failure) { if (mounted.current) { setError(failure.message); setDuplicateId(failure.retailerId || null); } }
     finally { busy.current = false; if (mounted.current) setSaving(false); }
@@ -1028,6 +1139,7 @@ function RetailerEditor({ retailer, currentUid, canChangeStatus, requirePermissi
           {key === "phone" ? <RetailerPhoneInput value={form.phone} country={form.country} disabled={saving} onChange={(phone) => setForm((previous) => ({ ...previous, phone }))} /> : key === "notes" ? <textarea aria-label={label} value={form[key]} maxLength={5000} disabled={saving} onChange={(e) => setForm({ ...form, [key]: e.target.value })} style={{ ...userFieldStyle, boxSizing: "border-box" }} /> : <input aria-label={label} value={form[key]} required={key === "name"} maxLength={500} disabled={saving} onChange={(e) => setForm({ ...form, [key]: e.target.value })} style={{ ...userFieldStyle, boxSizing: "border-box" }} />}
         </label>)}
       </div>
+      {!retailer && canAssign && <RepAssignmentChoices value={assignments} onChange={setAssignments} repDirectory={repDirectory} disabled={saving} />}
       {retailer && canChangeStatus && <label><input type="checkbox" checked={form.active} disabled={saving} onChange={(e) => setForm({ ...form, active: e.target.checked })} /> Active</label>}
       {error && <p role="alert" style={{ color: "#d98a7c" }}>{error}</p>}
       {duplicateId && <button type="button" className="hg-btn" style={userButtonStyle} onClick={() => onOpenExisting(duplicateId)}>Open Existing Retailer</button>}
@@ -1037,23 +1149,32 @@ function RetailerEditor({ retailer, currentUid, canChangeStatus, requirePermissi
 }
 function RetailerDirectory({ directory, selectedId, onSelect, user, permissions, draft, requirePermission, onStartOrder, onHistory, onClose }) {
   const [search, setSearch] = useState("");
+  const [assignmentFilter, setAssignmentFilter] = useState("");
+  const [editingAssignments, setEditingAssignments] = useState(false);
+  const repDirectory = useAssignmentProfiles(user, permissions.canAssignRetailers);
   const [editor, setEditor] = useState(null);
   const [replace, setReplace] = useState(false);
   const selected = directory.records.find((item) => item.id === selectedId);
-  useEffect(() => { setEditor(null); setReplace(false); }, [selectedId, selected?.active]);
+  useEffect(() => { setEditor(null); setReplace(false); setEditingAssignments(false); }, [selectedId, selected?.active]);
   const select = (id) => { if (requirePermission("canUseRetailers")) { setEditor(null); onSelect(id); } };
   const start = () => {
     if (!requirePermission("canUseRetailers") || !selected?.active) return;
     if (hasMeaningfulDraft(draft)) setReplace(true); else onStartOrder(selected.id);
   };
-  const results = directory.records.filter((item) => retailerSearch(item, search));
+  const hasMine = directory.records.some((item) => retailerAssignments(item).includes(user.uid));
+  const activeFilter = assignmentFilter || (permissions.canFilterOwnRetailers && hasMine ? "mine" : "all");
+  const results = filterRetailerAssignments(directory.records, activeFilter, user.uid).filter((item) => retailerSearch(item, search));
   return <div style={{ maxWidth: 1000, margin: "0 auto", padding: 24 }}>
     <button className="hg-btn" style={userButtonStyle} onClick={selectedId ? () => select(null) : onClose}><ArrowLeft size={14} /> {selectedId ? "Back to Retailers" : "Back to list"}</button>
     <h1 style={{ fontFamily: "'Bebas Neue', sans-serif" }}>Retailers</h1>
     {directory.error && <p role="alert">{directory.error} <button className="hg-btn" style={userButtonStyle} onClick={directory.reload}>Reload Retailers</button></p>}
+    {permissions.canAssignRetailers && repDirectory.error && <p role="alert">{repDirectory.error} Assignments are preserved. <button className="hg-btn" style={userButtonStyle} onClick={repDirectory.reload}>Retry</button></p>}
     {!directory.ready ? <p>Loading retailers…</p> : selectedId ? selected ? <>
       <h2>{selected.name}</h2><p>{selected.active ? "Active" : "Inactive — unavailable for new orders"}</p>
       {Object.entries(RETAILER_FIELDS).filter(([key]) => key !== "name").map(([key, label]) => selected[key] && <p key={key} style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}><strong>{label}:</strong> {key === "phone" ? formatRetailerPhone(selected.phone, selected.country) : selected[key]}</p>)}
+      <section style={{ overflowWrap: "anywhere" }}><h3>Assigned Reps</h3><p>{assignmentSummary(selected, user.uid, permissions.canAssignRetailers, repDirectory.profiles)}</p>
+        {permissions.canAssignRetailers && <button className="hg-btn" style={userButtonStyle} onClick={() => { if (requirePermission("canAssignRetailers")) setEditingAssignments(true); }}>Edit Assigned Reps</button>}
+      </section>
       <p>Created by {selected.creatorDisplayName || "Not recorded"} · {savedOrderDate(selected.createdAt)}</p>
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
         <button className="hg-btn" style={userButtonStyle} onClick={() => { if (requirePermission("canUseRetailers")) setEditor(selected); }}>Edit Retailer</button>
@@ -1062,13 +1183,19 @@ function RetailerDirectory({ directory, selectedId, onSelect, user, permissions,
       </div><p style={{ color: "#8A93A0" }}>Linked history uses exact retailer IDs. Older free-text orders remain available through Order History search.</p>
     </> : <p>This retailer is inactive, no longer exists, or is not available to your account.</p> : <>
       <button className="hg-btn" style={userButtonStyle} onClick={() => { if (requirePermission("canUseRetailers")) setEditor({}); }}>+ Add Retailer</button>
+      <div style={{ marginTop: 16 }}><label>Assignment filter <select aria-label="Assignment filter" style={userFieldStyle} value={activeFilter} onChange={(event) => setAssignmentFilter(event.target.value)}>
+        <option value="all">{permissions.canFilterOwnRetailers ? "All Active Retailers" : "All Retailers"}</option>
+        {permissions.canFilterOwnRetailers ? <option value="mine">My Retailers</option> : <><option value="assigned">Assigned</option><option value="unassigned">Unassigned</option>{repDirectory.profiles.filter((profile) => isAssignableRep(profile) || directory.records.some((item) => retailerAssignments(item).includes(profile.uid))).map((profile) => <option key={profile.uid} value={"rep:" + profile.uid}>{assignedRepLabel(profile.uid, user.uid, true, repDirectory.profiles)}</option>)}</>}
+      </select></label></div>
+      {permissions.canFilterOwnRetailers && !hasMine && <p>No retailers are currently assigned to you. <button className="hg-btn" style={userButtonStyle} onClick={() => setAssignmentFilter("all")}>All Active Retailers</button></p>}
       <input aria-label="Search retailers" placeholder="Search name, contact, city or state…" style={{ ...userFieldStyle, boxSizing: "border-box", margin: "16px 0" }} value={search} onChange={(e) => setSearch(e.target.value)} />
       {!directory.records.length ? <p>No retailers yet.</p> : !results.length ? <p>No retailers match your search.</p> : results.map((item) => <button key={item.id} className="hg-btn" style={{ ...userButtonStyle, display: "block", width: "100%", textAlign: "left", padding: 16, marginBottom: 10 }} onClick={() => select(item.id)}>
         <strong>{item.name}</strong>{permissions.canChangeRetailerStatus && <span> · {item.active ? "Active" : "Inactive"}</span>}
-        <RetailerLocation retailer={item} /><div>{[item.contactName, item.email, formatRetailerPhone(item.phone, item.country)].filter(Boolean).join(" · ")}</div>
+        <RetailerLocation retailer={item} /><div>{[item.contactName, item.email, formatRetailerPhone(item.phone, item.country)].filter(Boolean).join(" · ")}</div><div style={{ whiteSpace: "normal", overflowWrap: "anywhere", marginTop: 6 }}>{assignmentSummary(item, user.uid, permissions.canAssignRetailers, repDirectory.profiles, true)}</div>
       </button>)}
     </>}
-    {editor && (!editor.id || (selected && (selected.active || permissions.canChangeRetailerStatus))) && <RetailerEditor retailer={editor.id ? editor : null} currentUid={user.uid} canChangeStatus={permissions.canChangeRetailerStatus} requirePermission={requirePermission} onClose={() => setEditor(null)} onSaved={select} onOpenExisting={select} />}
+    {editor && (!editor.id || (selected && (selected.active || permissions.canChangeRetailerStatus))) && <RetailerEditor retailer={editor.id ? editor : null} currentUid={user.uid} canChangeStatus={permissions.canChangeRetailerStatus} canAssign={permissions.canAssignRetailers} repDirectory={repDirectory} requirePermission={requirePermission} onClose={() => setEditor(null)} onSaved={select} onOpenExisting={select} />}
+    {editingAssignments && selected && permissions.canAssignRetailers && <RetailerAssignmentEditor retailer={selected} user={user} repDirectory={repDirectory} requirePermission={requirePermission} onClose={() => setEditingAssignments(false)} />}
     {replace && selected?.active && <div role="dialog" aria-modal="true" aria-label="Replace current order" style={{ position: "fixed", inset: 0, zIndex: 65, background: "rgba(0,0,0,0.7)", display: "grid", placeItems: "center", padding: 16 }}><div style={{ background: "#1c1f24", border: "1px solid #B8894C", borderRadius: 8, padding: 24 }}><h2>Start New Order for {selected.name}?</h2><p>Your current active draft will be replaced. Saved orders remain unchanged.</p><button className="hg-btn" style={userButtonStyle} onClick={() => { if (requirePermission("canUseRetailers")) onStartOrder(selected.id, true); }}>Replace Current Order</button> <button className="hg-btn" style={userButtonStyle} onClick={() => setReplace(false)}>Cancel</button></div></div>}
   </div>;
 }

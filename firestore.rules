@@ -187,9 +187,23 @@ match /orders/{orderId} {
 // -------------------------------
 // SHARED RETAILER DIRECTORY
 // -------------------------------
+// Optional assignment metadata. No per-assignee document lookups in rules.
+function validRepUidAt(uids, index) {
+  return uids.size() <= index || (uids[index] is string && uids[index].matches('^[^/]{1,128}$'));
+}
+function validRepAssignments(data) {
+  let uids = data.get('assignedRepUids', []);
+  return uids is list && uids.size() <= 10 && uids.toSet().size() == uids.size()
+    && validRepUidAt(uids, 0) && validRepUidAt(uids, 1)
+    && validRepUidAt(uids, 2) && validRepUidAt(uids, 3)
+    && validRepUidAt(uids, 4) && validRepUidAt(uids, 5)
+    && validRepUidAt(uids, 6) && validRepUidAt(uids, 7)
+    && validRepUidAt(uids, 8) && validRepUidAt(uids, 9);
+}
 function validRetailer(data) {
-  return data.keys().hasOnly(['schemaVersion', 'active', 'name', 'contactName', 'email', 'phone', 'address1', 'address2', 'city', 'state', 'postalCode', 'country', 'website', 'notes', 'nameNormalized', 'creatorUid', 'creatorDisplayName', 'createdAt', 'updatedAt'])
+  return data.keys().hasOnly(['assignedRepUids', 'schemaVersion', 'active', 'name', 'contactName', 'email', 'phone', 'address1', 'address2', 'city', 'state', 'postalCode', 'country', 'website', 'notes', 'nameNormalized', 'creatorUid', 'creatorDisplayName', 'createdAt', 'updatedAt'])
     && data.keys().hasAll(['schemaVersion', 'active', 'name', 'contactName', 'email', 'phone', 'address1', 'address2', 'city', 'state', 'postalCode', 'country', 'website', 'notes', 'nameNormalized', 'creatorUid', 'creatorDisplayName', 'createdAt', 'updatedAt'])
+    && validRepAssignments(data)
     && data.schemaVersion is int && data.schemaVersion == 1
     && data.active is bool
     && data.name is string && data.name.size() <= 500
@@ -213,12 +227,14 @@ function validRetailer(data) {
 match /retailers/{retailerId} {
   allow read: if canUseOrders() && (isManager() || resource.data.active == true);
   allow create: if canUseOrders() && validRetailer(request.resource.data)
+    && (isManager() || !('assignedRepUids' in request.resource.data) || request.resource.data.assignedRepUids == [])
     && request.resource.data.active == true
     && request.resource.data.creatorUid == request.auth.uid
     && request.resource.data.creatorDisplayName == userDoc(request.auth.uid).data.displayName
     && request.resource.data.createdAt == request.time
     && request.resource.data.updatedAt == request.time;
   allow update: if canUseOrders() && validRetailer(request.resource.data)
+    && (isManager() || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['assignedRepUids']))
     && (isManager() || (resource.data.active == true && request.resource.data.active == resource.data.active))
     && request.resource.data.creatorUid == resource.data.creatorUid
     && request.resource.data.creatorDisplayName == resource.data.creatorDisplayName
