@@ -898,13 +898,45 @@ function OrderHistory({ user, profile, cigars, packOptions, draft, requirePermis
 }
 
 const RETAILER_FIELDS = Object.freeze({ name: "Retailer Name", contactName: "Contact Name", email: "Email", phone: "Phone", address1: "Address 1", address2: "Address 2", city: "City", state: "State", postalCode: "Postal Code", country: "Country", website: "Website", notes: "Customer Notes" });
-const retailerSearch = (retailer, search) => [retailer.name, retailer.contactName, retailer.city, retailer.state].some((value) => normalizeRetailerName(value || "").includes(normalizeRetailerName(search)));
+const retailerLocation = (retailer) => [retailer.city, retailer.state].map((value) => (value || "").trim().replace(/\s+/g, " ")).filter(Boolean).join(", ");
+const normalizeRetailerSearch = (value) => normalizeRetailerName(value || "").replace(/\s+/g, " ").replace(/\s*,\s*/g, ", ");
+const retailerSearch = (retailer, search) => [retailer.name, retailer.contactName, retailer.city, retailer.state, retailerLocation(retailer)].some((value) => normalizeRetailerSearch(value).includes(normalizeRetailerSearch(search)));
+function RetailerLocation({ retailer }) {
+  const location = retailerLocation(retailer);
+  return location ? React.createElement("div", { style: { display: "block", marginTop: 6, color: "#C9CFD6", whiteSpace: "normal", overflowWrap: "anywhere" } }, location) : null;
+}
 const validRetailerId = (id) => typeof id === "string" && id.length > 0 && id.length <= 128 && !id.includes("/");
 const hasMeaningfulDraft = (draft) => Boolean(draft.retailerId || draft.orderItems.length || [draft.orderRetailer, draft.orderEmail, draft.orderNotes].some((value) => value.trim()));
 const retailerOrderFields = (retailer) => {
   if (!retailer?.active || !validRetailerId(retailer.id)) throw new Error("This retailer is no longer available for new orders.");
   return { retailerId: retailer.id, orderRetailer: retailer.name, orderEmail: retailer.email };
 };
+function formatRetailerPhone(phone = "", country = "") {
+  if (!["", "united states", "usa", "us"].includes(country.trim().toLowerCase())) return phone;
+  // Preserve extensions, explicit foreign country codes, and overlong numbers.
+  if (!/^[\d\s()+.\-]*$/.test(phone)) return phone;
+  let digits = phone.replace(/\D/g, "");
+  if (phone.includes("+") && !(phone.trim().startsWith("+1") && digits.length === 11)) return phone;
+  if (digits.length === 11 && digits.startsWith("1")) digits = digits.slice(1);
+  if (digits.length > 10) return phone;
+  if (digits.length < 3) return digits;
+  const area = `(${digits.slice(0, 3)})`;
+  if (digits.length === 3) return area;
+  return `${area} ${digits.slice(3, 6)}${digits.length > 6 ? "-" + digits.slice(6) : ""}`;
+}
+function RetailerPhoneInput({ value, country, disabled, onChange }) {
+  return React.createElement("input", {
+    "aria-label": "Phone", type: "tel", value, maxLength: 500, disabled,
+    style: { ...userFieldStyle, boxSizing: "border-box" },
+    onChange: (event) => {
+      const next = event.target.value;
+      // Leave middle edits, deletions and IME composition untouched until blur.
+      const preserve = event.target.selectionStart !== next.length || event.nativeEvent?.inputType?.startsWith("delete") || event.nativeEvent?.isComposing;
+      onChange(preserve ? next : formatRetailerPhone(next, country));
+    },
+    onBlur: (event) => onChange(formatRetailerPhone(event.target.value, country))
+  });
+}
 function validateRetailer(input) {
   const result = {};
   for (const key of Object.keys(RETAILER_FIELDS)) {
@@ -912,6 +944,7 @@ function validateRetailer(input) {
     result[key] = input[key].trim();
     if (result[key].length > (key === "notes" ? 5000 : 500)) throw new Error(`${RETAILER_FIELDS[key]} is too long.`);
   }
+  result.phone = formatRetailerPhone(result.phone, result.country);
   if (!result.name) throw new Error("Retailer Name is required.");
   if (result.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(result.email)) throw new Error("Enter a valid email address.");
   if (typeof input.active !== "boolean") throw new Error("Invalid retailer status.");
@@ -970,7 +1003,7 @@ function useRetailerDirectory(user, profile, enabled) {
   return { ...(state.scope === scope ? state : { records: [], ready: false, error: "" }), reload: () => setRetry((value) => value + 1) };
 }
 function RetailerEditor({ retailer, currentUid, canChangeStatus, requirePermission, onClose, onSaved, onOpenExisting }) {
-  const [form, setForm] = useState(() => ({ ...Object.fromEntries(Object.keys(RETAILER_FIELDS).map((key) => [key, retailer?.[key] || (key === "country" ? "United States" : "")])), active: retailer?.active ?? true }));
+  const [form, setForm] = useState(() => ({ ...Object.fromEntries(Object.keys(RETAILER_FIELDS).map((key) => [key, retailer?.[key] || (key === "country" ? "United States" : "")])), phone: formatRetailerPhone(retailer?.phone || "", retailer?.country || ""), active: retailer?.active ?? true }));
   const [error, setError] = useState("");
   const [duplicateId, setDuplicateId] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -992,7 +1025,7 @@ function RetailerEditor({ retailer, currentUid, canChangeStatus, requirePermissi
       <h2>{retailer ? "Edit Retailer" : "Add Retailer"}</h2>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
         {Object.entries(RETAILER_FIELDS).map(([key, label]) => <label key={key}>{label}{key === "name" ? " *" : ""}
-          {key === "notes" ? <textarea aria-label={label} value={form[key]} maxLength={5000} disabled={saving} onChange={(e) => setForm({ ...form, [key]: e.target.value })} style={{ ...userFieldStyle, boxSizing: "border-box" }} /> : <input aria-label={label} value={form[key]} required={key === "name"} maxLength={500} disabled={saving} onChange={(e) => setForm({ ...form, [key]: e.target.value })} style={{ ...userFieldStyle, boxSizing: "border-box" }} />}
+          {key === "phone" ? <RetailerPhoneInput value={form.phone} country={form.country} disabled={saving} onChange={(phone) => setForm((previous) => ({ ...previous, phone }))} /> : key === "notes" ? <textarea aria-label={label} value={form[key]} maxLength={5000} disabled={saving} onChange={(e) => setForm({ ...form, [key]: e.target.value })} style={{ ...userFieldStyle, boxSizing: "border-box" }} /> : <input aria-label={label} value={form[key]} required={key === "name"} maxLength={500} disabled={saving} onChange={(e) => setForm({ ...form, [key]: e.target.value })} style={{ ...userFieldStyle, boxSizing: "border-box" }} />}
         </label>)}
       </div>
       {retailer && canChangeStatus && <label><input type="checkbox" checked={form.active} disabled={saving} onChange={(e) => setForm({ ...form, active: e.target.checked })} /> Active</label>}
@@ -1020,7 +1053,7 @@ function RetailerDirectory({ directory, selectedId, onSelect, user, permissions,
     {directory.error && <p role="alert">{directory.error} <button className="hg-btn" style={userButtonStyle} onClick={directory.reload}>Reload Retailers</button></p>}
     {!directory.ready ? <p>Loading retailers…</p> : selectedId ? selected ? <>
       <h2>{selected.name}</h2><p>{selected.active ? "Active" : "Inactive — unavailable for new orders"}</p>
-      {Object.entries(RETAILER_FIELDS).filter(([key]) => key !== "name").map(([key, label]) => selected[key] && <p key={key} style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}><strong>{label}:</strong> {selected[key]}</p>)}
+      {Object.entries(RETAILER_FIELDS).filter(([key]) => key !== "name").map(([key, label]) => selected[key] && <p key={key} style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}><strong>{label}:</strong> {key === "phone" ? formatRetailerPhone(selected.phone, selected.country) : selected[key]}</p>)}
       <p>Created by {selected.creatorDisplayName || "Not recorded"} · {savedOrderDate(selected.createdAt)}</p>
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
         <button className="hg-btn" style={userButtonStyle} onClick={() => { if (requirePermission("canUseRetailers")) setEditor(selected); }}>Edit Retailer</button>
@@ -1032,7 +1065,7 @@ function RetailerDirectory({ directory, selectedId, onSelect, user, permissions,
       <input aria-label="Search retailers" placeholder="Search name, contact, city or state…" style={{ ...userFieldStyle, boxSizing: "border-box", margin: "16px 0" }} value={search} onChange={(e) => setSearch(e.target.value)} />
       {!directory.records.length ? <p>No retailers yet.</p> : !results.length ? <p>No retailers match your search.</p> : results.map((item) => <button key={item.id} className="hg-btn" style={{ ...userButtonStyle, display: "block", width: "100%", textAlign: "left", padding: 16, marginBottom: 10 }} onClick={() => select(item.id)}>
         <strong>{item.name}</strong>{permissions.canChangeRetailerStatus && <span> · {item.active ? "Active" : "Inactive"}</span>}
-        <div>{[item.city, item.state].filter(Boolean).join(", ")}</div><div>{[item.contactName, item.email, item.phone].filter(Boolean).join(" · ")}</div>
+        <RetailerLocation retailer={item} /><div>{[item.contactName, item.email, formatRetailerPhone(item.phone, item.country)].filter(Boolean).join(" · ")}</div>
       </button>)}
     </>}
     {editor && (!editor.id || (selected && (selected.active || permissions.canChangeRetailerStatus))) && <RetailerEditor retailer={editor.id ? editor : null} currentUid={user.uid} canChangeStatus={permissions.canChangeRetailerStatus} requirePermission={requirePermission} onClose={() => setEditor(null)} onSaved={select} onOpenExisting={select} />}

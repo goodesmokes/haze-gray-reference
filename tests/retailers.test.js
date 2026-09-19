@@ -9,6 +9,20 @@ const ast=parser.parse(source,{sourceType:'module',plugins:['jsx']}),nodes={};
 traverse(ast,{FunctionDeclaration(p){nodes[p.node.id.name]=p.node;},VariableDeclarator(p){if(p.node.id.name !== 'filtered' || p.getFunctionParent()?.node.id?.name === 'OrderHistory') nodes[p.node.id.name]=p.node.init;}});
 const text=name=>source.slice(nodes[name].start,nodes[name].end);
 const form={...Object.fromEntries(Object.keys(client.RETAILER_FIELDS).map(key=>[key,''])),name:'  Harbor Shop  ',active:true};
+test('directory cards render normalized location only when available',()=>{
+ const ui=loadClient({React:{createElement:(tag,props,child)=>({tag,props,child})}});
+ for(const [retailer,expected] of [[{city:' Esteli ',state:' OK '},'Esteli, OK'],[{city:'Esteli'},'Esteli'],[{state:'OK'},'OK']]){
+   const rendered=ui.RetailerLocation({retailer});assert.equal(rendered.tag,'div');assert.equal(rendered.child,expected);assert.equal(rendered.props.style.display,'block');
+ }
+ for(const retailer of [{},{city:'',state:''},{city:'  ',state:'  '}])assert.equal(ui.RetailerLocation({retailer}),null);
+ // Ensure the actual directory card uses this component, rather than testing an unused formatter.
+ assert.match(text('RetailerDirectory'),/<RetailerLocation retailer=\{item\} \/>/);
+});
+test('directory search matches individual and combined location, name and contact',()=>{
+ const retailer={name:'Harbor Shop',contactName:'Pat Smith',city:' Esteli ',state:' OK '};
+ for(const query of ['Esteli','OK','Esteli, OK','esteli, ok','  ESTELI ,   ok  ','Esteli,OK','harbor',' PAT SMITH '])assert(client.retailerSearch(retailer,query),query);
+ assert(!client.retailerSearch(retailer,'Esteli, VA'));
+});
 test('retailer normalization, form limits, duplicate warnings, search and roles',()=>{
  const data=client.validateRetailer({...form,email:' sales@example.test ',phone:'+1 (555) ext 7'});
  assert.equal(data.name,'Harbor Shop');assert.equal(data.nameNormalized,'harbor shop');assert.equal(data.email,'sales@example.test');
@@ -72,8 +86,51 @@ test('directory subscriptions fail closed across account, role changes and error
 test('existing rules change only by adding retailers and optional order retailerId',()=>{
  const current=fs.readFileSync('firestore.rules','utf8').replace(/\r\n/g,'\n');
  const old=cp.execFileSync('git',['show','HEAD:firestore.rules'],{encoding:'utf8'}).replace(/\r\n/g,'\n');
+ if(old.includes('match /retailers/')) { assert.equal(current,old); return; }
  const restored=current.replace(/\/\/ -------------------------------\n\/\/ SHARED RETAILER DIRECTORY[\s\S]*?(?=\/\/ Everything else denied\.)/,'')
  .replace("hasOnly(['retailerId', 'schemaVersion', 'status'","hasOnly(['schemaVersion', 'status'")
  .split('\n').filter(line=>!line.includes("!('retailerId' in request.resource.data)")).join('\n');
  assert.equal(restored,old);
+});
+
+test('US phone formats raw, punctuated, country-code and progressive values',()=>{
+ const format=client.formatRetailerPhone;
+ for(const country of ['', 'United States','USA','US',' us ']){
+  for(const phone of ['5551234567','555-123-4567','(555)1234567','15551234567','+1 (555) 123-4567'])assert.equal(format(phone,country),'(555) 123-4567');
+ }
+ const expected=['','5','55','(555)','(555) 1','(555) 12','(555) 123','(555) 123-4','(555) 123-45','(555) 123-456','(555) 123-4567'];
+ expected.forEach((value,index)=>assert.equal(format('5551234567'.slice(0,index)),value));
+ assert.equal(format('   '),'');
+ for(const phone of ['+44 20 7946 0958','5551234567','  020 7946 0958 ext 2  '])assert.equal(format(phone,'United Kingdom'),phone);
+ for(const phone of ['+44 20 7946 0958','555123456789','555-123-4567 ext 2'])assert.equal(format(phone,''),phone);
+});
+
+test('phone input normalizes typing and paste but preserves cursor edits until blur',()=>{
+ const ui=loadClient({React:{createElement:(tag,props)=>({tag,props})},userFieldStyle:{}});
+ let result;
+ const input=ui.RetailerPhoneInput({value:'',country:'US',disabled:false,onChange:value=>result=value}).props;
+ const event=(value,inputType='insertText',selectionStart=value.length)=>({target:{value,selectionStart},nativeEvent:{inputType}});
+ input.onChange(event('555'));assert.equal(result,'(555)');
+ input.onChange(event('555-123-4567','insertFromPaste'));assert.equal(result,'(555) 123-4567');
+ input.onChange(event('15551234567','insertFromPaste'));assert.equal(result,'(555) 123-4567');
+ input.onChange(event('(555','deleteContentBackward'));assert.equal(result,'(555');
+ input.onChange(event('5551234567','insertText',2));assert.equal(result,'5551234567');
+ input.onBlur(event('5551234567'));assert.equal(result,'(555) 123-4567');
+ const foreign=ui.RetailerPhoneInput({value:'',country:'France',onChange:value=>result=value}).props;
+ foreign.onChange(event('+33 1 23 45 67 89','insertFromPaste'));assert.equal(result,'+33 1 23 45 67 89');
+ foreign.onBlur(event('+33 1 23 45 67 89'));assert.equal(result,'+33 1 23 45 67 89');
+});
+
+test('existing retailer phones format on edit, display and save through shared helper',()=>{
+ let initializer;
+ traverse(ast,{CallExpression(p){if(p.node.callee.name==='useState' && p.getFunctionParent()?.node.id?.name==='RetailerEditor' && p.node.arguments[0]?.type==='ArrowFunctionExpression')initializer=p.node.arguments[0];}});
+ const initialize=Function('retailer','RETAILER_FIELDS','formatRetailerPhone','return ('+source.slice(initializer.start,initializer.end)+')()');
+ assert.equal(initialize({phone:'5551234567',country:'US'},client.RETAILER_FIELDS,client.formatRetailerPhone).phone,'(555) 123-4567');
+ assert.equal(initialize(null,client.RETAILER_FIELDS,client.formatRetailerPhone).phone,'');
+ assert.equal(initialize({phone:'5551234567',country:'France'},client.RETAILER_FIELDS,client.formatRetailerPhone).phone,'5551234567');
+ assert.equal(client.validateRetailer({...form,phone:'5551234567'}).phone,'(555) 123-4567');
+ assert.equal(client.validateRetailer({...form,phone:'5551234567',country:'France'}).phone,'5551234567');
+ assert.match(text('RetailerEditor'),/<RetailerPhoneInput value=\{form.phone\} country=\{form.country\}/);
+ assert.match(text('RetailerDirectory'),/formatRetailerPhone\(selected.phone, selected.country\)/);
+ assert.match(text('RetailerDirectory'),/formatRetailerPhone\(item.phone, item.country\)/);
 });
