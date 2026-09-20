@@ -123,6 +123,18 @@ test('phone input normalizes typing and paste but preserves cursor edits until b
  foreign.onBlur(event('+33 1 23 45 67 89'));assert.equal(result,'+33 1 23 45 67 89');
 });
 
+test('retailer form identifies address fields while keeping territory out of browser address autofill',()=>{
+ const autocomplete=Function('return '+text('RETAILER_AUTOCOMPLETE'))();
+ assert.deepEqual(autocomplete,{contactName:'name',email:'email',phone:'tel',address1:'address-line1',address2:'address-line2',city:'address-level2',state:'address-level1',postalCode:'postal-code',country:'country-name',website:'url'});
+ const editor=text('RetailerEditor');
+ assert.match(editor,/autoComplete=\{RETAILER_AUTOCOMPLETE\[key\]\}/);
+ assert.match(editor,/aria-label="Retailer territory" autoComplete="off" list="retailer-territory-options"/);
+ assert.match(editor,/onChange=\{\(e\) => setForm\(\{ \.\.\.form, \[key\]: e\.target\.value \}\)\}/);
+ assert.doesNotMatch(editor,/address2\s*:\s*form\.address1|address1\s*:\s*form\.address2/);
+ const phone=loadClient({React:{createElement:(tag,props)=>({tag,props})},userFieldStyle:{}}).RetailerPhoneInput({value:'',country:'US',onChange:()=>{}});
+ assert.equal(phone.props.autoComplete,'tel');
+});
+
 test('existing retailer phones format on edit, display and save through shared helper',()=>{
  let initializer;
  traverse(ast,{CallExpression(p){if(p.node.callee.name==='useState' && p.getFunctionParent()?.node.id?.name==='RetailerEditor' && p.node.arguments[0]?.type==='ArrowFunctionExpression' && p.parentPath.node.id?.elements?.[0]?.name==='form')initializer=p.node.arguments[0];}});

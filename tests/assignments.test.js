@@ -45,6 +45,10 @@ test('My/All/Assigned/Unassigned/rep filters preserve the shared dataset and sea
  assert.equal(defaultFilter('',{canFilterOwnRetailers:true},false),'all');
  assert.equal(defaultFilter('all',{canFilterOwnRetailers:true},true),'all');
  assert.equal(defaultFilter('',{canFilterOwnRetailers:false},true),'all');
+ const showEmptyState=Function('activeFilter','hasMine','return '+text('showMyRetailersEmptyState'));
+ assert(showEmptyState('mine',false));
+ for(const filter of ['all','assigned','unassigned','rep:b'])assert(!showEmptyState(filter,false),filter);
+ assert(!showEmptyState('mine',true));
  for(const role of ['owner','admin','field_rep']){
   const permissions=client.getProfilePermissions({role,active:true});
   assert.equal(defaultFilter('',permissions,true),role==='field_rep'?'mine':'all');
@@ -54,6 +58,7 @@ test('My/All/Assigned/Unassigned/rep filters preserve the shared dataset and sea
  }
  assert.match(text('RetailerDirectory'),/permissions.canFilterOwnRetailers && <option value="mine">/);
  assert.match(text('RetailerDirectory'),/permissions.canAssignRetailers && <>/);
+ assert.match(text('RetailerDirectory'),/\{showMyRetailersEmptyState && <p>No retailers are currently assigned to you\./);
  assert.match(text('RetailerDirectory'),/No retailers are currently assigned to you/);
  for(const role of ['owner','admin'])assert(client.getProfilePermissions({role,active:true}).canAssignRetailers);
  assert(client.getProfilePermissions({role:'field_rep',active:true}).canFilterOwnRetailers);

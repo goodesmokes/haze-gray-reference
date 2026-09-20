@@ -898,6 +898,7 @@ function OrderHistory({ user, profile, cigars, packOptions, draft, requirePermis
 }
 
 const RETAILER_FIELDS = Object.freeze({ name: "Retailer Name", contactName: "Contact Name", email: "Email", phone: "Phone", address1: "Address 1", address2: "Address 2", city: "City", state: "State", postalCode: "Postal Code", country: "Country", website: "Website", notes: "Customer Notes" });
+const RETAILER_AUTOCOMPLETE = Object.freeze({ contactName: "name", email: "email", phone: "tel", address1: "address-line1", address2: "address-line2", city: "address-level2", state: "address-level1", postalCode: "postal-code", country: "country-name", website: "url" });
 const retailerLocation = (retailer) => [retailer.city, retailer.state].map((value) => (value || "").trim().replace(/\s+/g, " ")).filter(Boolean).join(", ");
 const normalizeRetailerSearch = (value) => normalizeRetailerName(value || "").replace(/\s+/g, " ").replace(/\s*,\s*/g, ", ");
 const retailerSearch = (retailer, search) => [retailer.name, retailer.contactName, retailer.city, retailer.state, retailerLocation(retailer), retailer.territory].some((value) => normalizeRetailerSearch(value).includes(normalizeRetailerSearch(search)));
@@ -926,7 +927,7 @@ function formatRetailerPhone(phone = "", country = "") {
 }
 function RetailerPhoneInput({ value, country, disabled, onChange }) {
   return React.createElement("input", {
-    "aria-label": "Phone", type: "tel", value, maxLength: 500, disabled,
+    "aria-label": "Phone", type: "tel", autoComplete: "tel", value, maxLength: 500, disabled,
     style: { ...userFieldStyle, boxSizing: "border-box" },
     onChange: (event) => {
       const next = event.target.value;
@@ -1178,11 +1179,11 @@ function RetailerEditor({ retailer, currentUid, canChangeStatus, canAssign, canE
       <h2>{retailer ? "Edit Retailer" : "Add Retailer"}</h2>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
         {Object.entries(RETAILER_FIELDS).map(([key, label]) => <label key={key}>{label}{key === "name" ? " *" : ""}
-          {key === "phone" ? <RetailerPhoneInput value={form.phone} country={form.country} disabled={saving} onChange={(phone) => setForm((previous) => ({ ...previous, phone }))} /> : key === "notes" ? <textarea aria-label={label} value={form[key]} maxLength={5000} disabled={saving} onChange={(e) => setForm({ ...form, [key]: e.target.value })} style={{ ...userFieldStyle, boxSizing: "border-box" }} /> : <input aria-label={label} value={form[key]} required={key === "name"} maxLength={500} disabled={saving} onChange={(e) => setForm({ ...form, [key]: e.target.value })} style={{ ...userFieldStyle, boxSizing: "border-box" }} />}
+          {key === "phone" ? <RetailerPhoneInput value={form.phone} country={form.country} disabled={saving} onChange={(phone) => setForm((previous) => ({ ...previous, phone }))} /> : key === "notes" ? <textarea aria-label={label} value={form[key]} maxLength={5000} disabled={saving} onChange={(e) => setForm({ ...form, [key]: e.target.value })} style={{ ...userFieldStyle, boxSizing: "border-box" }} /> : <input aria-label={label} autoComplete={RETAILER_AUTOCOMPLETE[key]} value={form[key]} required={key === "name"} maxLength={500} disabled={saving} onChange={(e) => setForm({ ...form, [key]: e.target.value })} style={{ ...userFieldStyle, boxSizing: "border-box" }} />}
         </label>)}
       </div>
       {canEditTerritory ? <label style={{ display: "block", marginTop: 12 }}>Territory
-        <input aria-label="Retailer territory" list="retailer-territory-options" value={territory} maxLength={500} disabled={saving} onChange={(event) => setTerritory(event.target.value)} style={{ ...userFieldStyle, boxSizing: "border-box" }} placeholder="Unassigned Territory" />
+        <input aria-label="Retailer territory" autoComplete="off" list="retailer-territory-options" value={territory} maxLength={500} disabled={saving} onChange={(event) => setTerritory(event.target.value)} style={{ ...userFieldStyle, boxSizing: "border-box" }} placeholder="Unassigned Territory" />
         <datalist id="retailer-territory-options">{territoryOptions.map((option) => <option key={option.value} value={option.label} />)}</datalist>
       </label> : <p>Territory: {retailer ? retailerTerritoryLabel(retailer) : territoryDisplay(homeTerritory) || "Unassigned Territory"}{!retailer && " (from your current user profile)"}</p>}
       {!retailer && canAssign && <RepAssignmentChoices value={assignments} onChange={setAssignments} repDirectory={repDirectory} disabled={saving} />}
@@ -1210,6 +1211,7 @@ function RetailerDirectory({ directory, selectedId, onSelect, user, profile, per
   };
   const hasMine = directory.records.some((item) => retailerAssignments(item).includes(user.uid));
   const activeFilter = assignmentFilter || (permissions.canFilterOwnRetailers && !permissions.canAssignRetailers && hasMine ? "mine" : "all");
+  const showMyRetailersEmptyState = activeFilter === "mine" && !hasMine;
   const territoryOptions = retailerTerritoryOptions(directory.records, permissions.canEditRetailerTerritory ? repDirectory.profiles : [], profile);
   const mismatches = territoryMismatches(selected, repDirectory.profiles, permissions.canEditRetailerTerritory);
   const results = filterRetailerTerritories(filterRetailerAssignments(directory.records, activeFilter, user.uid), territoryFilter, profile?.territory).filter((item) => retailerSearch(item, search));
@@ -1241,7 +1243,7 @@ function RetailerDirectory({ directory, selectedId, onSelect, user, profile, per
         {permissions.canFilterOwnRetailers && <option value="mine">My Retailers</option>}
         {permissions.canAssignRetailers && <><option value="assigned">Assigned</option><option value="unassigned">Unassigned</option>{repDirectory.profiles.filter((profile) => isAssignableRetailerUser(profile) || directory.records.some((item) => retailerAssignments(item).includes(profile.uid))).map((profile) => <option key={profile.uid} value={"rep:" + profile.uid}>{assignedRepLabel(profile.uid, user.uid, true, repDirectory.profiles)}</option>)}</>}
       </select></label></div>
-      {permissions.canFilterOwnRetailers && !hasMine && <p>No retailers are currently assigned to you. <button className="hg-btn" style={userButtonStyle} onClick={() => setAssignmentFilter("all")}>{permissions.canAssignRetailers ? "All Retailers" : "All Active Retailers"}</button></p>}
+      {showMyRetailersEmptyState && <p>No retailers are currently assigned to you. <button className="hg-btn" style={userButtonStyle} onClick={() => setAssignmentFilter("all")}>{permissions.canAssignRetailers ? "All Retailers" : "All Active Retailers"}</button></p>}
       <div style={{ marginTop: 12 }}><label>Territory filter <select aria-label="Territory filter" style={userFieldStyle} value={territoryFilter} onChange={(event) => { setTerritoryFilter(event.target.value); if (!permissions.canEditRetailerTerritory) setAssignmentFilter("all"); }}>
         <option value="all">All Territories</option><option value="mine" disabled={!normalizeTerritory(profile?.territory)}>My Territory</option><option value="other">Other Territories</option><option value="unassigned">Unassigned Territory</option>
         {territoryOptions.map((option) => <option key={option.value} value={"territory:" + option.value}>{option.label}</option>)}
