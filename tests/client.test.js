@@ -1,4 +1,5 @@
 const fs=require('fs'),vm=require('vm'),assert=require('assert/strict'),cp=require('child_process');
+const {loadClient}=require('./client-helpers.cjs');
 const parser=require('@babel/parser'),traverse=require('@babel/traverse').default;
 const babel={babelParse:code=>parser.parse(code,{sourceType:'module',plugins:['jsx']}),traverse};
 process.chdir(require('node:path').join(__dirname,'..'));
@@ -8,7 +9,7 @@ const ast=babel.babelParse(source,'index.jsx',true),oldAst=babel.babelParse(orig
 function named(tree,name){let result;babel.traverse(tree,{FunctionDeclaration(p){if(p.node.id.name===name)result=p.node;},VariableDeclarator(p){if(p.node.id.name===name)result=p.node.init;}});assert(result,name);return result;}
 const text=name=>{const n=named(ast,name);return source.slice(n.start,n.end);};
 const clean=n=>JSON.parse(JSON.stringify(n,(key,value)=>['start','end','loc','extra','leadingComments','trailingComments','innerComments'].includes(key)?undefined:value));
-for(const name of ['firebaseConfig','SEED_CIGARS','getGaugePosition','Gauge','parseMoney','getNumericPrice','getSinglePrice','computePackageMargins','addToOrder','DetailOrderControls','saveAuthorizationProfile','AuthorizationProfileEditor','AuthorizedUsers','orderWholesaleTotal','orderRetailTotal','orderGrossProfit','orderMarginPct','buildOrderText','emailOrder','copyOrderText'])assert.deepEqual(clean(named(ast,name)),clean(named(oldAst,name)),name+' changed');
+for(const name of ['firebaseConfig','SEED_CIGARS','getGaugePosition','Gauge','addToOrder','DetailOrderControls','saveAuthorizationProfile','AuthorizationProfileEditor','AuthorizedUsers','orderWholesaleTotal','orderRetailTotal','orderGrossProfit','orderMarginPct','buildOrderText','emailOrder','copyOrderText'])assert.deepEqual(clean(named(ast,name)),clean(named(oldAst,name)),name+' changed');
 const rules=fs.readFileSync('firestore.rules','utf8').replace(/\r\n/g,'\n');
 const oldRules=cp.execFileSync('git',['show','HEAD:firestore.rules'],{encoding:'utf8'}).replace(/\r\n/g,'\n');
 // Exclude only the new orders section on both sides, whether HEAD predates or includes it.
@@ -20,7 +21,8 @@ assert.notEqual(legacyRules(rules.replace('allow create, update, delete: if isMa
 assert.notEqual(legacyRules(rules.replace('request.resource.data.role == resource.data.role','true')),legacyRules(rules), 'Authorized Users protection changes must remain detectable');
 console.log('PASS preservation: config, seed data, gauges, catalog/Authorized Users rules, pricing, original order handlers and exports');
 const ctx={console,TextEncoder};vm.createContext(ctx);
-for(const name of ['parseMoney','getNumericPrice','getSinglePrice','validRetailerId', 'buildSavedOrder','buildReorderPlan','mergeReorderItems','loadOrderDraft'])vm.runInContext(text(name),ctx);
+const pricing=loadClient();Object.assign(ctx,{parseMoney:pricing.parseMoney,getNumericPrice:pricing.getNumericPrice,getSinglePrice:pricing.getSinglePrice,computePackageMargins:pricing.computePackageMargins});
+for(const name of ['validRetailerId', 'buildSavedOrder','buildReorderPlan','mergeReorderItems','loadOrderDraft'])vm.runInContext(text(name),ctx);
 for(const name of ['normalizeRetailerName','orderMoney','nonnegativeMoney','savedOrderDate','ORDER_DRAFT_STORAGE_KEY','PACK_OPTIONS','SEED_CIGARS'])vm.runInContext('globalThis.'+name+'='+text(name),ctx);
 const user={uid:'rep'},profile={displayName:'Test Rep',role:'field_rep',active:true};
 const line={lineKey:'1982__1982-robusto__box10',cigarId:'1982',cigarName:'1982',vitola:'Robusto',dims:'50 x 5',packKey:'box10',packLabel:'10ct Box',unitPrice:60,retailUnitValue:124,qty:2};
