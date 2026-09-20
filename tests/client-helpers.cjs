@@ -10,6 +10,8 @@ const territorySource = readRepositoryFile('js/domain/territories.mjs');
 const territoryNames = ['territoryDisplay', 'normalizeTerritory', 'retailerTerritoryLabel', 'retailerTerritoryFields', 'retailerTerritoryOptions', 'filterRetailerTerritories', 'territoryMismatches'];
 const assignmentSource = readRepositoryFile('js/domain/assignments.mjs');
 const assignmentNames = ['retailerAssignments', 'isAssignableRetailerUser', 'validateRepAssignments', 'assignedRepLabel', 'assignmentSummary', 'filterRetailerAssignments'];
+const savedOrderSource = readRepositoryFile('js/domain/saved-orders.mjs');
+const savedOrderNames = ['nonnegativeMoney', 'isReadableSavedOrder', 'buildSavedOrder', 'buildReorderPlan', 'mergeReorderItems'];
 const names = ['ROLE_LABELS', 'NO_PERMISSIONS', 'ROLE_PERMISSIONS', 'isValidRole', 'isActiveProfile', 'getProfilePermissions', 'normalizeRetailerName', 'nonnegativeMoney', 'PACK_OPTIONS', 'SEED_CIGARS', 'parseMoney', 'getNumericPrice', 'getSinglePrice', 'validRetailerId', 'buildSavedOrder', 'isReadableSavedOrder', 'buildReorderPlan', 'mergeReorderItems', 'savePendingOrder', 'RETAILER_FIELDS', 'RETAILER_AUTOCOMPLETE', 'territoryDisplay', 'normalizeTerritory', 'retailerTerritoryLabel', 'retailerTerritoryFields', 'retailerTerritoryOptions', 'filterRetailerTerritories', 'territoryMismatches', 'retailerAssignments', 'isAssignableRetailerUser', 'validateRepAssignments', 'assignedRepLabel', 'assignmentSummary', 'filterRetailerAssignments', 'checkNewRepAssignments', 'saveRetailerAssignments', 'useAssignmentProfiles', 'formatRetailerPhone', 'RetailerPhoneInput', 'validateRetailer', 'findDuplicateRetailer', 'retailerLocation', 'normalizeRetailerSearch', 'RetailerLocation', 'retailerSearch', 'hasMeaningfulDraft', 'retailerOrderFields', 'saveRetailerProfile'];
 const nodes = collectNamedNodes(source, (name) => names.includes(name));
 const pricingNodes = collectNamedNodes(pricingSource, (name) => pricingNames.includes(name));
@@ -17,9 +19,10 @@ const authorizationNodes = collectNamedNodes(authorizationSource, (name) => auth
 const retailerNodes = collectNamedNodes(retailerSource, (name) => retailerNames.includes(name));
 const territoryNodes = collectNamedNodes(territorySource, (name) => territoryNames.includes(name));
 const assignmentNodes = collectNamedNodes(assignmentSource, (name) => assignmentNames.includes(name));
+const savedOrderNodes = collectNamedNodes(savedOrderSource, (name) => savedOrderNames.includes(name));
 exports.loadClient = (environment = {}) => {
   const code = names.map((name) => {
-    const module = [[pricingNodes, pricingSource], [authorizationNodes, authorizationSource], [retailerNodes, retailerSource], [territoryNodes, territorySource], [assignmentNodes, assignmentSource]].find(([sourceNodes]) => sourceNodes.has(name));
+    const module = [[pricingNodes, pricingSource], [authorizationNodes, authorizationSource], [retailerNodes, retailerSource], [territoryNodes, territorySource], [assignmentNodes, assignmentSource], [savedOrderNodes, savedOrderSource]].find(([sourceNodes]) => sourceNodes.has(name));
     const [sourceNodes, declarationSource] = module || [nodes, source];
     const node = sourceNodes.get(name); if (!node) throw new Error('Missing client helper: ' + name);
     const body = nodeText(declarationSource, sourceNodes, name);
