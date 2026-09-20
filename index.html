@@ -33,6 +33,7 @@ import { initializeApp } from "firebase/app";
 import { getFirestore, doc, getDoc, setDoc, updateDoc, deleteDoc, collection, onSnapshot, getDocs, query, where, orderBy, runTransaction, serverTimestamp } from "firebase/firestore";
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from "firebase/auth";
 import { parseMoney, getNumericPrice, getSinglePrice, computePackageMargins } from "./js/domain/pricing.mjs";
+import { ROLE_LABELS, NO_PERMISSIONS, ROLE_PERMISSIONS, isValidRole, isActiveProfile, getProfilePermissions, getAssignableRoles, canManageAuthorizationProfile, authorizationUpdateError } from "./js/domain/authorization.mjs";
 
 const firebaseConfig = {
   apiKey: "AIzaSyDYzcHxcQNKUzoJWp4Jd2c67DAvc51N1Pk",
@@ -47,39 +48,6 @@ const db = getFirestore(fbApp);
 const auth = getAuth(fbApp);
 const CIGARS_COL = collection(db, "cigars");
 const LEGACY_DOC = doc(db, "app-data", "cigars");
-
-const ROLE_LABELS = Object.freeze({ owner: "Owner", admin: "Admin", field_rep: "Field Rep", viewer: "Viewer" });
-const NO_PERMISSIONS = Object.freeze({
-  canEditCatalog: false, canEditPackages: false, canUseOrderBuilder: false,
-  canUseFinalReview: false, canManageUsers: false, canMigrateLegacyData: false,
-  canManageOwners: false, canUseRetailers: false, canChangeRetailerStatus: false, canAssignRetailers: false, canFilterOwnRetailers: false, canEditRetailerTerritory: false,
-});
-const ROLE_PERMISSIONS = Object.freeze({
-  owner: Object.freeze({ ...NO_PERMISSIONS, canEditCatalog: true, canEditPackages: true, canUseOrderBuilder: true, canUseFinalReview: true, canManageUsers: true, canUseRetailers: true, canChangeRetailerStatus: true, canAssignRetailers: true, canEditRetailerTerritory: true, canFilterOwnRetailers: true, canMigrateLegacyData: true, canManageOwners: true }),
-  admin: Object.freeze({ ...NO_PERMISSIONS, canEditCatalog: true, canEditPackages: true, canUseOrderBuilder: true, canUseFinalReview: true, canManageUsers: true, canUseRetailers: true, canChangeRetailerStatus: true, canAssignRetailers: true, canEditRetailerTerritory: true, canFilterOwnRetailers: true }),
-  field_rep: Object.freeze({ ...NO_PERMISSIONS, canUseOrderBuilder: true, canUseFinalReview: true, canUseRetailers: true, canFilterOwnRetailers: true }),
-  viewer: NO_PERMISSIONS,
-});
-const isValidRole = (role) => typeof role === "string" && Object.prototype.hasOwnProperty.call(ROLE_PERMISSIONS, role);
-const isActiveProfile = (profile) => profile?.active === true && isValidRole(profile.role);
-const getProfilePermissions = (profile) => isActiveProfile(profile) ? ROLE_PERMISSIONS[profile.role] : NO_PERMISSIONS;
-const getAssignableRoles = (managerProfile) => {
-  const permissions = getProfilePermissions(managerProfile);
-  if (!permissions.canManageUsers) return [];
-  return Object.keys(ROLE_LABELS).filter((role) => role !== "owner" || permissions.canManageOwners);
-};
-const canManageAuthorizationProfile = (managerProfile, profile) => Boolean(profile &&
-  getProfilePermissions(managerProfile).canManageUsers &&
-  (getProfilePermissions(managerProfile).canManageOwners || getAssignableRoles(managerProfile).includes(profile.role)));
-const authorizationUpdateError = (managerProfile, currentUid, targetUid, profile, changes) => {
-  if (!canManageAuthorizationProfile(managerProfile, profile)) return "You are not authorized to edit this authorization profile.";
-  if (!getAssignableRoles(managerProfile).includes(changes.role)) return "You are not authorized to assign this role.";
-  if (currentUid === targetUid) {
-    if (changes.role !== profile.role) return "You cannot change your own authorization role.";
-    if (changes.active !== true) return "You cannot disable your own authorization profile.";
-  }
-  return "";
-};
 
 // Application authorization only. Firestore Security Rules remain the enforcement boundary.
 const userFieldStyle = { width: "100%", background: "#14161A", border: "1px solid #454b53", borderRadius: 4, padding: "8px 10px", color: "#EDE6D6", fontSize: 14 };

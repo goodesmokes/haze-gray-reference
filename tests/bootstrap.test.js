@@ -14,6 +14,7 @@ test('index.html remains the application entry point with its React root and mou
   assert(imports.some((node) => node.source.value === 'react'));
   assert(imports.some((node) => node.source.value === 'react-dom/client'));
   assert(imports.some((node) => node.source.value === './js/domain/pricing.mjs'));
+  assert(imports.some((node) => node.source.value === './js/domain/authorization.mjs'));
 
   let rootLookup = false, appMount = false;
   traverse(ast, {
