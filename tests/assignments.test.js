@@ -20,17 +20,17 @@ test('assignment lists support legacy, shared ownership, removals and bounded UI
 
 test('assignment names/status are manager-only; reps receive anonymous labels',()=>{
  const profiles=[{uid:'a',displayName:'Alice',role:'field_rep',active:true},{uid:'b',displayName:'Bob',role:'field_rep',active:false},{uid:'c',displayName:'Carol',role:'admin',active:true}];
- assert.equal(client.assignedRepLabel('a','a',true,profiles),'Alice');
- assert.match(client.assignedRepLabel('b','a',true,profiles),/Bob.*Former \/ inactive rep/);
- assert.match(client.assignedRepLabel('c','a',true,profiles),/Carol.*Former \/ inactive rep/);
+ assert.equal(client.assignedRepLabel('a','a',true,profiles),'Alice — Field Rep (Active)');
+ assert.match(client.assignedRepLabel('b','a',true,profiles),/Bob.*Inactive Field Rep/);
+ assert.match(client.assignedRepLabel('c','a',true,profiles),/Carol.*Admin \(Active\)/);
  assert.equal(client.assignedRepLabel('missing','a',true,profiles),'Unavailable user');
  assert.equal(client.assignedRepLabel('a','a',false,profiles),'You');
- assert.equal(client.assignedRepLabel('b','a',false,profiles),'Other assigned rep');
+ assert.equal(client.assignedRepLabel('b','a',false,profiles),'Other assigned user');
  assert.equal(client.assignmentSummary({},'a',false,profiles),'Unassigned');
- assert.equal(client.assignmentSummary({assignedRepUids:['a','b']},'a',false,profiles),'Assigned (2): You, Other assigned rep');
- assert.equal(client.assignmentSummary({assignedRepUids:['a','b','c']},'a',true,profiles,true),'Assigned (3): Alice +2');
+ assert.equal(client.assignmentSummary({assignedRepUids:['a','b']},'a',false,profiles),'Assigned (2): You, Other assigned user');
+ assert.equal(client.assignmentSummary({assignedRepUids:['a','b','c']},'a',true,profiles,true),'Assigned (3): Alice — Field Rep (Active) +2');
  assert.match(client.assignmentSummary({assignedRepUids:['a','b','c']},'a',true,profiles),/Carol/);
- assert.deepEqual(profiles.filter(client.isAssignableRep).map(p=>p.uid),['a']);
+ assert.deepEqual(profiles.filter(client.isAssignableRetailerUser).map(p=>p.uid),['a','c']);
 });
 
 test('My/All/Assigned/Unassigned/rep filters preserve the shared dataset and search',()=>{
@@ -45,11 +45,21 @@ test('My/All/Assigned/Unassigned/rep filters preserve the shared dataset and sea
  assert.equal(defaultFilter('',{canFilterOwnRetailers:true},false),'all');
  assert.equal(defaultFilter('all',{canFilterOwnRetailers:true},true),'all');
  assert.equal(defaultFilter('',{canFilterOwnRetailers:false},true),'all');
+ for(const role of ['owner','admin','field_rep']){
+  const permissions=client.getProfilePermissions({role,active:true});
+  assert.equal(defaultFilter('',permissions,true),role==='field_rep'?'mine':'all');
+  assert.equal(defaultFilter('mine',permissions,true),'mine');
+  const records=[{id:'mine',assignedRepUids:[role]},{id:'other',assignedRepUids:['another']}];
+  assert.deepEqual(client.filterRetailerAssignments(records,'mine',role).map(r=>r.id),['mine']);
+ }
+ assert.match(text('RetailerDirectory'),/permissions.canFilterOwnRetailers && <option value="mine">/);
+ assert.match(text('RetailerDirectory'),/permissions.canAssignRetailers && <>/);
  assert.match(text('RetailerDirectory'),/No retailers are currently assigned to you/);
  for(const role of ['owner','admin'])assert(client.getProfilePermissions({role,active:true}).canAssignRetailers);
  assert(client.getProfilePermissions({role:'field_rep',active:true}).canFilterOwnRetailers);
  for(const role of ['field_rep','viewer','unknown'])assert(!client.getProfilePermissions({role,active:true}).canAssignRetailers);
- for(const role of ['owner','admin','viewer'])assert(!client.getProfilePermissions({role,active:true}).canFilterOwnRetailers);
+ for(const role of ['owner','admin'])assert(client.getProfilePermissions({role,active:true}).canFilterOwnRetailers);
+ assert(!client.getProfilePermissions({role:'viewer',active:true}).canFilterOwnRetailers);
  assert(!client.getProfilePermissions({role:'owner',active:false}).canAssignRetailers);
 });
 
@@ -67,7 +77,7 @@ test('profile listener never starts for Field Reps and clears across accounts, r
  assert.deepEqual(ui.useAssignmentProfiles({uid:'admin'},true).profiles,[]);
  old({docs:[{id:'secret',data:()=>({displayName:'old'})}]});assert.deepEqual(state.profiles,[]);
  callback({docs:[{id:'b',data:()=>({displayName:'Bob'})}]});assert.equal(state.profiles[0].uid,'b');
- failure(new Error('permission denied'));assert.deepEqual(state.profiles,[]);assert.match(state.error,/Could not load rep profiles/);
+ failure(new Error('permission denied'));assert.deepEqual(state.profiles,[]);assert.match(state.error,/Could not load assignment profiles/);
  cleanup();auth.currentUser={uid:'rep'};assert.deepEqual(ui.useAssignmentProfiles({uid:'rep'},false).profiles,[]);assert.equal(subscriptions,2);
  cleanup();auth.currentUser=null;assert.deepEqual(ui.useAssignmentProfiles(null,false).profiles,[]);assert.equal(stops,2);
  assert.match(text('RetailerDirectory'),/useAssignmentProfiles\(user, permissions.canAssignRetailers\)/);
@@ -85,11 +95,26 @@ test('save handler requires manager role, checks newly assigned active reps and 
   assert.equal(writes.length,1);assert.deepEqual(writes[0].data,{assignedRepUids:['stale','a','b'],updatedAt:'server-time'});assert(!reads.includes('users/stale'));
  }
  for(const next of [['a'],[]]){writes=[];await ui.saveRetailerAssignments('r',next,['stale'],'manager',()=>true);assert.deepEqual(writes[0].data.assignedRepUids,next);}
- for(const next of [['inactive'],['missing']]){writes=[];await assert.rejects(ui.saveRetailerAssignments('r',next,['stale'],'manager',()=>true),/active Field Rep/);assert.equal(writes.length,0);}
- current=[];await assert.rejects(ui.saveRetailerAssignments('r',['stale'],[],'manager',()=>true),/active Field Rep/);
+ for(const next of [['inactive'],['missing']]){writes=[];await assert.rejects(ui.saveRetailerAssignments('r',next,['stale'],'manager',()=>true),/active Owner, Admin, or Field Rep/);assert.equal(writes.length,0);}
+ current=[];await assert.rejects(ui.saveRetailerAssignments('r',['stale'],[],'manager',()=>true),/active Owner, Admin, or Field Rep/);
  await assert.rejects(ui.saveRetailerAssignments('r',['a'],['stale'],'manager',()=>true),/Assignments changed/);
  for(const deniedRole of ['field_rep','viewer','unknown']){role=deniedRole;writes=[];await assert.rejects(ui.saveRetailerAssignments('r',['a'],[],'manager',()=>true),/not authorized/);assert.equal(writes.length,0);}
  role='owner';active=false;await assert.rejects(ui.saveRetailerAssignments('r',[],[],'manager',()=>true),/not authorized/);
  active=true;await assert.rejects(ui.saveRetailerAssignments('r',[],[],'manager',()=>false),/not authorized/);
  auth.currentUser=null;await assert.rejects(ui.saveRetailerAssignments('r',[],[],'manager',()=>true),/not authorized/);
+});
+
+test('mixed-role eligibility and current status labels preserve stale assignment identity',()=>{
+ const profiles=['owner','admin','field_rep','viewer','unknown'].flatMap(role=>[true,false].map(active=>({uid:role+'-'+active,role,active,displayName:role})));
+ assert.deepEqual(profiles.filter(client.isAssignableRetailerUser).map(p=>p.uid),['owner-true','admin-true','field_rep-true']);
+ assert(!client.isAssignableRetailerUser(null));
+ for(const [uid,expected] of [['owner-true','Owner (Active)'],['admin-true','Admin (Active)'],['owner-false','Inactive Owner'],['admin-false','Inactive Admin'],['viewer-true','Viewer (Active; not assignable)']])assert(client.assignedRepLabel(uid,'',true,profiles).includes(expected));
+ const retailer={assignedRepUids:['owner-false','admin-false','viewer-true','missing']},before=JSON.stringify(retailer);
+ assert.match(client.assignmentSummary(retailer,'',true,profiles),/Unavailable user/);assert.equal(JSON.stringify(retailer),before);
+ for(const uid of ['owner-true','admin-true'])assert.equal(client.assignedRepLabel(uid,'rep',false,profiles),'Other assigned user');
+});
+
+test('all Firestore rules and indexes remain byte-for-byte unchanged',()=>{
+ const cp=require('node:child_process');
+ for(const file of ['firestore.rules','firestore.indexes.json'])assert.equal(fs.readFileSync(file,'utf8').replace(/\r\n/g,'\n'),cp.execFileSync('git',['show','HEAD:'+file],{encoding:'utf8'}).replace(/\r\n/g,'\n'));
 });
