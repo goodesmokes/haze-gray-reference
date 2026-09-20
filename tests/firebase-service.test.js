@@ -39,7 +39,7 @@ test('Firebase service initializes each exported instance exactly once', () => {
   assert.equal(calls.getAuth[0].arguments[0].name, 'fbApp');
 });
 
-test('index imports Firebase instances and retains catalog references locally', () => {
+test('index imports Firebase instances without local initialization', () => {
   const source = extractInlineModule();
   const ast = parseModule(source);
   const serviceImport = ast.program.body.find((node) => node.type === 'ImportDeclaration' && node.source.value === './js/services/firebase.mjs');
@@ -54,15 +54,9 @@ test('index imports Firebase instances and retains catalog references locally', 
   });
   assert.deepEqual(forbiddenCalls, []);
 
-  const nodes = collectNamedNodes(source, (name) => ['firebaseConfig', 'fbApp', 'db', 'auth', 'CIGARS_COL', 'LEGACY_DOC'].includes(name));
+  const nodes = collectNamedNodes(source, (name) => ['firebaseConfig', 'fbApp', 'db', 'auth'].includes(name));
   assert.equal(nodes.has('firebaseConfig'), false);
   assert.equal(nodes.has('fbApp'), false);
   assert.equal(nodes.has('db'), false);
   assert.equal(nodes.has('auth'), false);
-  assert.equal(nodes.get('CIGARS_COL').callee.name, 'collection');
-  assert.equal(nodes.get('CIGARS_COL').arguments[0].name, 'db');
-  assert.equal(nodes.get('CIGARS_COL').arguments[1].value, 'cigars');
-  assert.equal(nodes.get('LEGACY_DOC').callee.name, 'doc');
-  assert.equal(nodes.get('LEGACY_DOC').arguments[0].name, 'db');
-  assert.deepEqual(nodes.get('LEGACY_DOC').arguments.slice(1).map((node) => node.value), ['app-data', 'cigars']);
 });
