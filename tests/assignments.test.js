@@ -114,7 +114,10 @@ test('mixed-role eligibility and current status labels preserve stale assignment
  for(const uid of ['owner-true','admin-true'])assert.equal(client.assignedRepLabel(uid,'rep',false,profiles),'Other assigned user');
 });
 
-test('all Firestore rules and indexes remain byte-for-byte unchanged',()=>{
+test('assignment validators and indexes remain unchanged',()=>{
  const cp=require('node:child_process');
- for(const file of ['firestore.rules','firestore.indexes.json'])assert.equal(fs.readFileSync(file,'utf8').replace(/\r\n/g,'\n'),cp.execFileSync('git',['show','HEAD:'+file],{encoding:'utf8'}).replace(/\r\n/g,'\n'));
+ const rules=fs.readFileSync('firestore.rules','utf8').replace(/\r\n/g,'\n'),oldRules=cp.execFileSync('git',['show','HEAD:firestore.rules'],{encoding:'utf8'}).replace(/\r\n/g,'\n');
+ const assignments=value=>value.slice(value.indexOf('function validRepUidAt'),value.indexOf('function validRetailer(')).replace(/\/\/ Optional organizational territory[\s\S]*/,'');
+ assert.equal(assignments(rules),assignments(oldRules));
+ for(const file of ['firestore.indexes.json'])assert.equal(fs.readFileSync(file,'utf8').replace(/\r\n/g,'\n'),cp.execFileSync('git',['show','HEAD:'+file],{encoding:'utf8'}).replace(/\r\n/g,'\n'));
 });

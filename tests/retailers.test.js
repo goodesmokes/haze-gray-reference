@@ -83,14 +83,16 @@ test('directory subscriptions fail closed across account, role changes and error
  fail(new Error('denied'));assert.deepEqual(state.records,[]);assert.match(state.error,/denied/);
  cleanup();auth.currentUser=null;hook(null,null,false);assert.deepEqual(state.records,[]);assert.equal(stopped,2);
 });
-test('retailer assignment is the only rules change; orders/users/catalog remain exact',()=>{
+test('only optional territory validation and permissions change in Firestore rules',()=>{
  const current=fs.readFileSync('firestore.rules','utf8').replace(/\r\n/g,'\n');
  const old=cp.execFileSync('git',['show','HEAD:firestore.rules'],{encoding:'utf8'}).replace(/\r\n/g,'\n');
- const withoutAssignments=value=>value
- .replace(/\/\/ Optional assignment metadata[\s\S]*?(?=function validRetailer)/,'')
- .replace("hasOnly(['assignedRepUids', 'schemaVersion'", "hasOnly(['schemaVersion'")
- .split('\n').filter(line=>!line.includes('&& validRepAssignments(data)') && !line.includes("&& (isManager() || !('assignedRepUids'") && !line.includes("&& (isManager() || !request.resource.data.diff(resource.data)" )).join('\n');
- assert.equal(withoutAssignments(current),withoutAssignments(old));
+ const withoutTerritory=value=>value
+ .replace("&& (isManager() || (request.resource.data.get('territory', '').trim() == userDoc(request.auth.uid).data.get('territory', '').trim()\n      && (!('assignedRepUids' in request.resource.data) || request.resource.data.assignedRepUids == [])))", "&& (isManager() || !('assignedRepUids' in request.resource.data) || request.resource.data.assignedRepUids == [])")
+ .replace("&& (isManager() || (resource.data.active == true && request.resource.data.active == resource.data.active\n      && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['assignedRepUids', 'territory', 'territoryNormalized'])))", "&& (isManager() || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['assignedRepUids']))\n    && (isManager() || (resource.data.active == true && request.resource.data.active == resource.data.active))")
+ .replace(/\/\/ Optional organizational territory[\s\S]*?(?=function validRetailer\()/,'')
+ .replace("hasOnly(['territory', 'territoryNormalized', 'assignedRepUids'", "hasOnly(['assignedRepUids'")
+ .split('\n').filter(line=>!line.includes('&& validRetailerTerritory(data)') && !line.includes("&& (isManager() || request.resource.data.get('territory'") && !line.includes("hasAny(['territory', 'territoryNormalized'])")).join('\n');
+ assert.equal(withoutTerritory(current),withoutTerritory(old));
 });
 
 test('US phone formats raw, punctuated, country-code and progressive values',()=>{
@@ -123,7 +125,7 @@ test('phone input normalizes typing and paste but preserves cursor edits until b
 
 test('existing retailer phones format on edit, display and save through shared helper',()=>{
  let initializer;
- traverse(ast,{CallExpression(p){if(p.node.callee.name==='useState' && p.getFunctionParent()?.node.id?.name==='RetailerEditor' && p.node.arguments[0]?.type==='ArrowFunctionExpression')initializer=p.node.arguments[0];}});
+ traverse(ast,{CallExpression(p){if(p.node.callee.name==='useState' && p.getFunctionParent()?.node.id?.name==='RetailerEditor' && p.node.arguments[0]?.type==='ArrowFunctionExpression' && p.parentPath.node.id?.elements?.[0]?.name==='form')initializer=p.node.arguments[0];}});
  const initialize=Function('retailer','RETAILER_FIELDS','formatRetailerPhone','return ('+source.slice(initializer.start,initializer.end)+')()');
  assert.equal(initialize({phone:'5551234567',country:'US'},client.RETAILER_FIELDS,client.formatRetailerPhone).phone,'(555) 123-4567');
  assert.equal(initialize(null,client.RETAILER_FIELDS,client.formatRetailerPhone).phone,'');

@@ -200,10 +200,19 @@ function validRepAssignments(data) {
     && validRepUidAt(uids, 6) && validRepUidAt(uids, 7)
     && validRepUidAt(uids, 8) && validRepUidAt(uids, 9);
 }
+// Optional organizational territory; it never controls reads or ordering.
+function validRetailerTerritory(data) {
+  let territory = data.get('territory', '');
+  return territory is string && territory.size() <= 500
+    && (!('territoryNormalized' in data) || (data.territoryNormalized is string
+      && data.territoryNormalized.size() <= 1500
+      && data.territoryNormalized == territory.trim().lower().replace('\\s+', ' ')));
+}
 function validRetailer(data) {
-  return data.keys().hasOnly(['assignedRepUids', 'schemaVersion', 'active', 'name', 'contactName', 'email', 'phone', 'address1', 'address2', 'city', 'state', 'postalCode', 'country', 'website', 'notes', 'nameNormalized', 'creatorUid', 'creatorDisplayName', 'createdAt', 'updatedAt'])
+  return data.keys().hasOnly(['territory', 'territoryNormalized', 'assignedRepUids', 'schemaVersion', 'active', 'name', 'contactName', 'email', 'phone', 'address1', 'address2', 'city', 'state', 'postalCode', 'country', 'website', 'notes', 'nameNormalized', 'creatorUid', 'creatorDisplayName', 'createdAt', 'updatedAt'])
     && data.keys().hasAll(['schemaVersion', 'active', 'name', 'contactName', 'email', 'phone', 'address1', 'address2', 'city', 'state', 'postalCode', 'country', 'website', 'notes', 'nameNormalized', 'creatorUid', 'creatorDisplayName', 'createdAt', 'updatedAt'])
     && validRepAssignments(data)
+    && validRetailerTerritory(data)
     && data.schemaVersion is int && data.schemaVersion == 1
     && data.active is bool
     && data.name is string && data.name.size() <= 500
@@ -227,15 +236,16 @@ function validRetailer(data) {
 match /retailers/{retailerId} {
   allow read: if canUseOrders() && (isManager() || resource.data.active == true);
   allow create: if canUseOrders() && validRetailer(request.resource.data)
-    && (isManager() || !('assignedRepUids' in request.resource.data) || request.resource.data.assignedRepUids == [])
+    && (isManager() || (request.resource.data.get('territory', '').trim() == userDoc(request.auth.uid).data.get('territory', '').trim()
+      && (!('assignedRepUids' in request.resource.data) || request.resource.data.assignedRepUids == [])))
     && request.resource.data.active == true
     && request.resource.data.creatorUid == request.auth.uid
     && request.resource.data.creatorDisplayName == userDoc(request.auth.uid).data.displayName
     && request.resource.data.createdAt == request.time
     && request.resource.data.updatedAt == request.time;
   allow update: if canUseOrders() && validRetailer(request.resource.data)
-    && (isManager() || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['assignedRepUids']))
-    && (isManager() || (resource.data.active == true && request.resource.data.active == resource.data.active))
+    && (isManager() || (resource.data.active == true && request.resource.data.active == resource.data.active
+      && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['assignedRepUids', 'territory', 'territoryNormalized'])))
     && request.resource.data.creatorUid == resource.data.creatorUid
     && request.resource.data.creatorDisplayName == resource.data.creatorDisplayName
     && request.resource.data.createdAt == resource.data.createdAt

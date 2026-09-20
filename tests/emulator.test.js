@@ -75,7 +75,7 @@ test('Spark browser SDK and Auth/Firestore rules', { skip: !enabled, timeout: 12
     });
     await t.test('retailers: shared reads, creation, status restrictions and immutable audit fields',async()=>{
       const form = { ...Object.fromEntries(Object.keys(rep.client.RETAILER_FIELDS).map(key=>[key,''])), name:'Shared Shop '+Date.now(), active:true };
-      const makeRetailer = (a) => ({ ...a.client.validateRetailer(form),schemaVersion:1,creatorUid:a.uid,creatorDisplayName:a.profile.displayName,createdAt:sdk.serverTimestamp(),updatedAt:sdk.serverTimestamp() });
+      const makeRetailer = (a) => ({ ...a.client.validateRetailer(form),...a.client.retailerTerritoryFields(a.profile.territory),schemaVersion:1,creatorUid:a.uid,creatorDisplayName:a.profile.displayName,createdAt:sdk.serverTimestamp(),updatedAt:sdk.serverTimestamp() });
       const refs=[];
       for(const a of allowed){const ref=sdk.doc(sdk.collection(a.db,'retailers'));await sdk.setDoc(ref,makeRetailer(a));refs.push(ref.id);}
       const id=refs[0], repRef=sdk.doc(rep.db,'retailers',id), ownerRef=sdk.doc(owner.db,'retailers',id), adminRef=sdk.doc(admin.db,'retailers',id);
@@ -138,7 +138,7 @@ test('Spark browser SDK and Auth/Firestore rules', { skip: !enabled, timeout: 12
     });
     await t.test('assignment rules validate all ten UID slots, exact fields, duplicates and create restrictions',async()=>{
       const form={...Object.fromEntries(Object.keys(rep.client.RETAILER_FIELDS).map(key=>[key,''])),name:'Assignment bounds '+Date.now(),active:true};
-      const create=(a,assignedRepUids)=>sdk.setDoc(sdk.doc(sdk.collection(a.db,'retailers')),{...a.client.validateRetailer(form),schemaVersion:1,creatorUid:a.uid,creatorDisplayName:a.profile.displayName,createdAt:sdk.serverTimestamp(),updatedAt:sdk.serverTimestamp(),assignedRepUids});
+      const create=(a,assignedRepUids)=>sdk.setDoc(sdk.doc(sdk.collection(a.db,'retailers')),{...a.client.validateRetailer(form),...a.client.retailerTerritoryFields(a.profile.territory),schemaVersion:1,creatorUid:a.uid,creatorDisplayName:a.profile.displayName,createdAt:sdk.serverTimestamp(),updatedAt:sdk.serverTimestamp(),assignedRepUids});
       for(const a of [owner,admin])for(const assigned of [[],[rep.uid],[rep.uid,'rep-b']])await create(a,assigned);
       await create(rep,[]);await denied(create(rep,[rep.uid]));await denied(create(rep,['rep-b']));
       for(const a of actors.filter(a=>!allowed.includes(a)))await denied(create(a,[]));
@@ -151,6 +151,39 @@ test('Spark browser SDK and Auth/Firestore rules', { skip: !enabled, timeout: 12
       assert.equal((await sdk.getDocFromServer(maximumRef)).data().assignedRepUids.length,10);
       for(const invalid of [null,'uid',{},[''],['a/b'],['x'.repeat(129)],['a','a'],[...ten,'eleventh']])await denied(create(owner,invalid));
       for(let i=0;i<10;i++){const invalid=[...ten];invalid[i]=42;await denied(create(owner,invalid));}
+    });
+    await t.test('territory permissions, legacy compatibility and ten-assignment updates',async()=>{
+      const form={...Object.fromEntries(Object.keys(rep.client.RETAILER_FIELDS).map(key=>[key,''])),name:'Territory '+Date.now(),active:true};
+      const id=await owner.client.saveRetailerProfile(null,form,owner.uid,()=>true);
+      const ref=sdk.doc(owner.db,'retailers',id), repRef=sdk.doc(rep.db,'retailers',id);
+      const update=(a,patch)=>sdk.updateDoc(sdk.doc(a.db,'retailers',id),{...patch,updatedAt:sdk.serverTimestamp()});
+      const ten=Array.from({length:10},(_,i)=>'boundary-'+i);
+      await update(owner,{assignedRepUids:ten});
+      for(const manager of [owner,admin])for(const territory of [' Eastern   Oklahoma ','West','x'.repeat(500),'']){
+        await update(manager,manager.client.retailerTerritoryFields(territory));
+        await update(rep,{city:'Allowed contact edit'});
+        assert.equal((await sdk.getDocFromServer(ref)).data().assignedRepUids.length,10);
+      }
+      for(const patch of [{territory:'West',territoryNormalized:'west'},{territoryNormalized:sdk.deleteField()},{territory:sdk.deleteField()},{assignedRepUids:[]},{active:false}])await denied(update(rep,patch));
+      for(const patch of [{territory:42},{territory:'x'.repeat(501)},{territory:'East',territoryNormalized:'wrong'},{territoryNormalized:42},{assignedRepUids:[...ten,'eleventh']}])await denied(update(owner,patch));
+      await update(owner,{territory:sdk.deleteField(),territoryNormalized:sdk.deleteField()});
+      await update(rep,{city:'Legacy remains editable'});
+      assert(!Object.hasOwn((await sdk.getDocFromServer(ref)).data(),'territory'));
+      await denied(update(rep,{territory:'',territoryNormalized:''}));
+      await assert.rejects(rep.client.saveRetailerProfile(id,{...form,territory:'West'},rep.uid,()=>true),/authorized/);
+      const original=rep.profile;
+      try {
+        for(const home of [' Eastern   Oklahoma ','']){
+          await seed('/users/'+rep.uid,{...original,territory:home});
+          const created=await rep.client.saveRetailerProfile(null,{...form,name:form.name+' rep '+home},rep.uid,()=>true);
+          const stored=(await sdk.getDocFromServer(sdk.doc(rep.db,'retailers',created))).data();
+          assert.equal(stored.territory,home.trim());assert.equal(stored.territoryNormalized,rep.client.normalizeTerritory(home));
+          const raw={...rep.client.validateRetailer(form),schemaVersion:1,creatorUid:rep.uid,creatorDisplayName:original.displayName,createdAt:sdk.serverTimestamp(),updatedAt:sdk.serverTimestamp(),territory:'Spoof',territoryNormalized:'spoof'};
+          await denied(sdk.setDoc(sdk.doc(sdk.collection(rep.db,'retailers')),raw));
+          await assert.rejects(rep.client.saveRetailerProfile(null,{...form,name:form.name+' spoof '+home,territory:'Spoof'},rep.uid,()=>true),/profile/);
+        }
+      } finally {await seed('/users/'+rep.uid,original);}
+      assert.equal((await sdk.getDocFromServer(repRef)).data().city,'Legacy remains editable');
     });
     await t.test('assignment client saves recheck profiles, preserve stale reps, reject conflicts and keep contact edits separate',async()=>{
       const repB='assignment-rep-b-'+Date.now();
