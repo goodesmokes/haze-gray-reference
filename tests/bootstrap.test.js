@@ -17,6 +17,7 @@ test('index.html remains the application entry point with its React root and mou
   assert(imports.some((node) => node.source.value === './js/domain/authorization.mjs'));
   for (const module of ['./js/domain/retailers.mjs', './js/domain/assignments.mjs', './js/domain/territories.mjs']) assert(imports.some((node) => node.source.value === module), module);
   assert(imports.some((node) => node.source.value === './js/domain/saved-orders.mjs'));
+  assert(imports.some((node) => node.source.value === './js/domain/catalog-data.mjs'));
 
   let rootLookup = false, appMount = false;
   traverse(ast, {

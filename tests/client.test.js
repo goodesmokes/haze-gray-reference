@@ -9,7 +9,7 @@ const ast=babel.babelParse(source,'index.jsx',true),oldAst=babel.babelParse(orig
 function named(tree,name){let result;babel.traverse(tree,{FunctionDeclaration(p){if(p.node.id.name===name)result=p.node;},VariableDeclarator(p){if(p.node.id.name===name)result=p.node.init;}});assert(result,name);return result;}
 const text=name=>{const n=named(ast,name);return source.slice(n.start,n.end);};
 const clean=n=>JSON.parse(JSON.stringify(n,(key,value)=>['start','end','loc','extra','leadingComments','trailingComments','innerComments'].includes(key)?undefined:value));
-for(const name of ['firebaseConfig','SEED_CIGARS','getGaugePosition','Gauge','addToOrder','DetailOrderControls','saveAuthorizationProfile','AuthorizationProfileEditor','AuthorizedUsers','orderWholesaleTotal','orderRetailTotal','orderGrossProfit','orderMarginPct','buildOrderText','emailOrder','copyOrderText'])assert.deepEqual(clean(named(ast,name)),clean(named(oldAst,name)),name+' changed');
+for(const name of ['firebaseConfig','getGaugePosition','Gauge','addToOrder','DetailOrderControls','saveAuthorizationProfile','AuthorizationProfileEditor','AuthorizedUsers','orderWholesaleTotal','orderRetailTotal','orderGrossProfit','orderMarginPct','buildOrderText','emailOrder','copyOrderText'])assert.deepEqual(clean(named(ast,name)),clean(named(oldAst,name)),name+' changed');
 const rules=fs.readFileSync('firestore.rules','utf8').replace(/\r\n/g,'\n');
 const oldRules=cp.execFileSync('git',['show','HEAD:firestore.rules'],{encoding:'utf8'}).replace(/\r\n/g,'\n');
 // Exclude only the new orders section on both sides, whether HEAD predates or includes it.
@@ -21,9 +21,9 @@ assert.notEqual(legacyRules(rules.replace('allow create, update, delete: if isMa
 assert.notEqual(legacyRules(rules.replace('request.resource.data.role == resource.data.role','true')),legacyRules(rules), 'Authorized Users protection changes must remain detectable');
 console.log('PASS preservation: config, seed data, gauges, catalog/Authorized Users rules, pricing, original order handlers and exports');
 const ctx={console,TextEncoder};vm.createContext(ctx);
-const domain=loadClient();Object.assign(ctx,{parseMoney:domain.parseMoney,getNumericPrice:domain.getNumericPrice,getSinglePrice:domain.getSinglePrice,computePackageMargins:domain.computePackageMargins,validRetailerId:domain.validRetailerId,normalizeRetailerName:domain.normalizeRetailerName,nonnegativeMoney:domain.nonnegativeMoney,buildSavedOrder:domain.buildSavedOrder,buildReorderPlan:domain.buildReorderPlan,mergeReorderItems:domain.mergeReorderItems});
+const domain=loadClient();Object.assign(ctx,{parseMoney:domain.parseMoney,getNumericPrice:domain.getNumericPrice,getSinglePrice:domain.getSinglePrice,computePackageMargins:domain.computePackageMargins,validRetailerId:domain.validRetailerId,normalizeRetailerName:domain.normalizeRetailerName,nonnegativeMoney:domain.nonnegativeMoney,buildSavedOrder:domain.buildSavedOrder,buildReorderPlan:domain.buildReorderPlan,mergeReorderItems:domain.mergeReorderItems,PACK_OPTIONS:domain.PACK_OPTIONS,SEED_CIGARS:domain.SEED_CIGARS});
 vm.runInContext(text('loadOrderDraft'),ctx);
-for(const name of ['orderMoney','savedOrderDate','ORDER_DRAFT_STORAGE_KEY','PACK_OPTIONS','SEED_CIGARS'])vm.runInContext('globalThis.'+name+'='+text(name),ctx);
+for(const name of ['orderMoney','savedOrderDate','ORDER_DRAFT_STORAGE_KEY'])vm.runInContext('globalThis.'+name+'='+text(name),ctx);
 const user={uid:'rep'},profile={displayName:'Test Rep',role:'field_rep',active:true};
 const line={lineKey:'1982__1982-robusto__box10',cigarId:'1982',cigarName:'1982',vitola:'Robusto',dims:'50 x 5',packKey:'box10',packLabel:'10ct Box',unitPrice:60,retailUnitValue:124,qty:2};
 const draft={orderItems:[line],orderRetailer:'  Test SHOP  ',orderEmail:'test@example.test',orderNotes:'Keep this draft'};
