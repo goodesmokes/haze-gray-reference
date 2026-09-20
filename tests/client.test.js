@@ -21,9 +21,9 @@ assert.notEqual(legacyRules(rules.replace('allow create, update, delete: if isMa
 assert.notEqual(legacyRules(rules.replace('request.resource.data.role == resource.data.role','true')),legacyRules(rules), 'Authorized Users protection changes must remain detectable');
 console.log('PASS preservation: config, seed data, gauges, catalog/Authorized Users rules, pricing, original order handlers and exports');
 const ctx={console,TextEncoder};vm.createContext(ctx);
-const pricing=loadClient();Object.assign(ctx,{parseMoney:pricing.parseMoney,getNumericPrice:pricing.getNumericPrice,getSinglePrice:pricing.getSinglePrice,computePackageMargins:pricing.computePackageMargins});
-for(const name of ['validRetailerId', 'buildSavedOrder','buildReorderPlan','mergeReorderItems','loadOrderDraft'])vm.runInContext(text(name),ctx);
-for(const name of ['normalizeRetailerName','orderMoney','nonnegativeMoney','savedOrderDate','ORDER_DRAFT_STORAGE_KEY','PACK_OPTIONS','SEED_CIGARS'])vm.runInContext('globalThis.'+name+'='+text(name),ctx);
+const domain=loadClient();Object.assign(ctx,{parseMoney:domain.parseMoney,getNumericPrice:domain.getNumericPrice,getSinglePrice:domain.getSinglePrice,computePackageMargins:domain.computePackageMargins,validRetailerId:domain.validRetailerId,normalizeRetailerName:domain.normalizeRetailerName});
+for(const name of ['buildSavedOrder','buildReorderPlan','mergeReorderItems','loadOrderDraft'])vm.runInContext(text(name),ctx);
+for(const name of ['orderMoney','nonnegativeMoney','savedOrderDate','ORDER_DRAFT_STORAGE_KEY','PACK_OPTIONS','SEED_CIGARS'])vm.runInContext('globalThis.'+name+'='+text(name),ctx);
 const user={uid:'rep'},profile={displayName:'Test Rep',role:'field_rep',active:true};
 const line={lineKey:'1982__1982-robusto__box10',cigarId:'1982',cigarName:'1982',vitola:'Robusto',dims:'50 x 5',packKey:'box10',packLabel:'10ct Box',unitPrice:60,retailUnitValue:124,qty:2};
 const draft={orderItems:[line],orderRetailer:'  Test SHOP  ',orderEmail:'test@example.test',orderNotes:'Keep this draft'};

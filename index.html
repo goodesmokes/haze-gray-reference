@@ -34,6 +34,9 @@ import { getFirestore, doc, getDoc, setDoc, updateDoc, deleteDoc, collection, on
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from "firebase/auth";
 import { parseMoney, getNumericPrice, getSinglePrice, computePackageMargins } from "./js/domain/pricing.mjs";
 import { ROLE_LABELS, NO_PERMISSIONS, ROLE_PERMISSIONS, isValidRole, isActiveProfile, getProfilePermissions, getAssignableRoles, canManageAuthorizationProfile, authorizationUpdateError } from "./js/domain/authorization.mjs";
+import { RETAILER_FIELDS, RETAILER_AUTOCOMPLETE, normalizeRetailerName, retailerLocation, normalizeRetailerSearch, retailerSearch, validRetailerId, formatRetailerPhone, validateRetailer, findDuplicateRetailer } from "./js/domain/retailers.mjs";
+import { retailerAssignments, isAssignableRetailerUser, validateRepAssignments, assignedRepLabel, assignmentSummary, filterRetailerAssignments } from "./js/domain/assignments.mjs";
+import { territoryDisplay, normalizeTerritory, retailerTerritoryLabel, retailerTerritoryFields, retailerTerritoryOptions, filterRetailerTerritories, territoryMismatches } from "./js/domain/territories.mjs";
 
 const firebaseConfig = {
   apiKey: "AIzaSyDYzcHxcQNKUzoJWp4Jd2c67DAvc51N1Pk",
@@ -474,7 +477,6 @@ function loadOrderDraft(uid) {
 }
 
 
-const normalizeRetailerName = (name) => name.trim().toLowerCase();
 const orderMoney = (value) => Number.isFinite(value) ? `$${value.toFixed(2)}` : "Not recorded";
 const savedOrderDate = (value) => value?.toDate ? value.toDate().toLocaleString() : "Date unavailable";
 const nonnegativeMoney = (value) => Number.isFinite(value) && value >= 0 && value <= 1000000000;
@@ -740,34 +742,15 @@ function OrderHistory({ user, profile, cigars, packOptions, draft, requirePermis
   </div>;
 }
 
-const RETAILER_FIELDS = Object.freeze({ name: "Retailer Name", contactName: "Contact Name", email: "Email", phone: "Phone", address1: "Address 1", address2: "Address 2", city: "City", state: "State", postalCode: "Postal Code", country: "Country", website: "Website", notes: "Customer Notes" });
-const RETAILER_AUTOCOMPLETE = Object.freeze({ contactName: "name", email: "email", phone: "tel", address1: "address-line1", address2: "address-line2", city: "address-level2", state: "address-level1", postalCode: "postal-code", country: "country-name", website: "url" });
-const retailerLocation = (retailer) => [retailer.city, retailer.state].map((value) => (value || "").trim().replace(/\s+/g, " ")).filter(Boolean).join(", ");
-const normalizeRetailerSearch = (value) => normalizeRetailerName(value || "").replace(/\s+/g, " ").replace(/\s*,\s*/g, ", ");
-const retailerSearch = (retailer, search) => [retailer.name, retailer.contactName, retailer.city, retailer.state, retailerLocation(retailer), retailer.territory].some((value) => normalizeRetailerSearch(value).includes(normalizeRetailerSearch(search)));
 function RetailerLocation({ retailer }) {
   const location = retailerLocation(retailer);
   return location ? React.createElement("div", { style: { display: "block", marginTop: 6, color: "#C9CFD6", whiteSpace: "normal", overflowWrap: "anywhere" } }, location) : null;
 }
-const validRetailerId = (id) => typeof id === "string" && id.length > 0 && id.length <= 128 && !id.includes("/");
 const hasMeaningfulDraft = (draft) => Boolean(draft.retailerId || draft.orderItems.length || [draft.orderRetailer, draft.orderEmail, draft.orderNotes].some((value) => value.trim()));
 const retailerOrderFields = (retailer) => {
   if (!retailer?.active || !validRetailerId(retailer.id)) throw new Error("This retailer is no longer available for new orders.");
   return { retailerId: retailer.id, orderRetailer: retailer.name, orderEmail: retailer.email };
 };
-function formatRetailerPhone(phone = "", country = "") {
-  if (!["", "united states", "usa", "us"].includes(country.trim().toLowerCase())) return phone;
-  // Preserve extensions, explicit foreign country codes, and overlong numbers.
-  if (!/^[\d\s()+.\-]*$/.test(phone)) return phone;
-  let digits = phone.replace(/\D/g, "");
-  if (phone.includes("+") && !(phone.trim().startsWith("+1") && digits.length === 11)) return phone;
-  if (digits.length === 11 && digits.startsWith("1")) digits = digits.slice(1);
-  if (digits.length > 10) return phone;
-  if (digits.length < 3) return digits;
-  const area = `(${digits.slice(0, 3)})`;
-  if (digits.length === 3) return area;
-  return `${area} ${digits.slice(3, 6)}${digits.length > 6 ? "-" + digits.slice(6) : ""}`;
-}
 function RetailerPhoneInput({ value, country, disabled, onChange }) {
   return React.createElement("input", {
     "aria-label": "Phone", type: "tel", autoComplete: "tel", value, maxLength: 500, disabled,
@@ -779,69 +762,6 @@ function RetailerPhoneInput({ value, country, disabled, onChange }) {
       onChange(preserve ? next : formatRetailerPhone(next, country));
     },
     onBlur: (event) => onChange(formatRetailerPhone(event.target.value, country))
-  });
-}
-const territoryDisplay = (value) => typeof value === "string" ? value.trim() : "";
-const normalizeTerritory = (value) => normalizeRetailerName(territoryDisplay(value)).replace(/\s+/g, " ");
-const retailerTerritoryLabel = (retailer) => territoryDisplay(retailer?.territory) || "Unassigned Territory";
-function retailerTerritoryFields(value) {
-  if (typeof value !== "string" || value.trim().length > 500) throw new Error("Territory must be text with at most 500 characters.");
-  return { territory: value.trim(), territoryNormalized: normalizeTerritory(value) };
-}
-function retailerTerritoryOptions(retailers, profiles, currentProfile) {
-  const options = new Map();
-  for (const value of [...retailers.map((item) => item.territory), ...profiles.filter((profile) => profile.active === true).map((profile) => profile.territory), currentProfile?.territory]) {
-    const key = normalizeTerritory(value);
-    if (key && !options.has(key)) options.set(key, territoryDisplay(value).replace(/\s+/g, " "));
-  }
-  return Array.from(options, ([value, label]) => ({ value, label })).sort((a, b) => a.label.localeCompare(b.label));
-}
-function filterRetailerTerritories(records, filter, homeTerritory) {
-  const home = normalizeTerritory(homeTerritory);
-  return records.filter((retailer) => {
-    const territory = normalizeTerritory(retailer.territory);
-    if (filter === "mine") return Boolean(home) && territory === home;
-    if (filter === "other") return Boolean(territory) && territory !== home;
-    if (filter === "unassigned") return !territory;
-    if (filter.startsWith("territory:")) return territory === filter.slice(10);
-    return true;
-  });
-}
-function territoryMismatches(retailer, profiles, canResolve) {
-  if (!canResolve) return [];
-  const home = normalizeTerritory(retailer?.territory);
-  return profiles.filter((profile) => retailerAssignments(retailer).includes(profile.uid) && normalizeTerritory(profile.territory) !== home)
-    .map((profile) => ({ uid: profile.uid, name: profile.displayName || "Unnamed user", territory: territoryDisplay(profile.territory) || "Unassigned Territory" }));
-}
-const retailerAssignments = (retailer) => Array.isArray(retailer?.assignedRepUids) ? retailer.assignedRepUids : [];
-const isAssignableRetailerUser = (profile) => profile?.active === true && ["owner", "admin", "field_rep"].includes(profile.role);
-function validateRepAssignments(uids) {
-  if (!Array.isArray(uids) || uids.length > 10 || new Set(uids).size !== uids.length || uids.some((uid) => typeof uid !== "string" || !uid.length || uid.length > 128 || uid.includes("/"))) throw new Error("Choose up to 10 different users.");
-  return [...uids];
-}
-function assignedRepLabel(uid, currentUid, canResolve, profiles) {
-  if (!canResolve) return uid === currentUid ? "You" : "Other assigned user";
-  const profile = profiles.find((item) => item.uid === uid);
-  if (!profile) return "Unavailable user";
-  const name = profile.displayName || "Unnamed user";
-  const role = ROLE_LABELS[profile.role] || "Unknown role";
-  if (profile.active !== true) return name + " — Inactive " + role;
-  return name + " — " + role + (isAssignableRetailerUser(profile) ? " (Active)" : " (Active; not assignable)");
-}
-function assignmentSummary(retailer, uid, canResolve, profiles, compact = false) {
-  const assigned = retailerAssignments(retailer);
-  if (!assigned.length) return "Unassigned";
-  const labels = assigned.map((id) => assignedRepLabel(id, uid, canResolve, profiles));
-  return "Assigned (" + assigned.length + "): " + (compact && labels.length > 2 ? labels[0] + " +" + (labels.length - 1) : labels.join(", "));
-}
-function filterRetailerAssignments(records, filter, uid) {
-  return records.filter((retailer) => {
-    const assigned = retailerAssignments(retailer);
-    if (filter === "mine") return assigned.includes(uid);
-    if (filter === "assigned") return assigned.length > 0;
-    if (filter === "unassigned") return assigned.length === 0;
-    if (filter.startsWith("rep:")) return assigned.includes(filter.slice(4));
-    return true;
   });
 }
 function useAssignmentProfiles(user, enabled) {
@@ -919,22 +839,6 @@ function RetailerAssignmentEditor({ retailer, user, repDirectory, requirePermiss
     {error && <p role="alert" style={{ color: "#d98a7c" }}>{error}</p>}
     <button className="hg-btn" style={userButtonStyle} disabled={saving}>{saving ? "Saving…" : "Save Assignments"}</button> <button type="button" className="hg-btn" style={userButtonStyle} onClick={onClose}>Cancel</button>
   </form></div>;
-}
-function validateRetailer(input) {
-  const result = {};
-  for (const key of Object.keys(RETAILER_FIELDS)) {
-    if (typeof input[key] !== "string") throw new Error(`Invalid ${RETAILER_FIELDS[key]}.`);
-    result[key] = input[key].trim();
-    if (result[key].length > (key === "notes" ? 5000 : 500)) throw new Error(`${RETAILER_FIELDS[key]} is too long.`);
-  }
-  result.phone = formatRetailerPhone(result.phone, result.country);
-  if (!result.name) throw new Error("Retailer Name is required.");
-  if (result.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(result.email)) throw new Error("Enter a valid email address.");
-  if (typeof input.active !== "boolean") throw new Error("Invalid retailer status.");
-  return { ...result, active: input.active, nameNormalized: normalizeRetailerName(result.name) };
-}
-function findDuplicateRetailer(retailers, name, exceptId = null) {
-  return retailers.find((retailer) => retailer.id !== exceptId && retailer.active && retailer.nameNormalized === normalizeRetailerName(name));
 }
 async function saveRetailerProfile(id, input, uid, requirePermission) {
   const permitted = () => auth.currentUser?.uid === uid && requirePermission("canUseRetailers");

@@ -124,7 +124,7 @@ test('phone input normalizes typing and paste but preserves cursor edits until b
 });
 
 test('retailer form identifies address fields while keeping territory out of browser address autofill',()=>{
- const autocomplete=Function('return '+text('RETAILER_AUTOCOMPLETE'))();
+ const autocomplete=client.RETAILER_AUTOCOMPLETE;
  assert.deepEqual(autocomplete,{contactName:'name',email:'email',phone:'tel',address1:'address-line1',address2:'address-line2',city:'address-level2',state:'address-level1',postalCode:'postal-code',country:'country-name',website:'url'});
  const editor=text('RetailerEditor');
  assert.match(editor,/autoComplete=\{RETAILER_AUTOCOMPLETE\[key\]\}/);

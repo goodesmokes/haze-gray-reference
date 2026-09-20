@@ -2,6 +2,7 @@ const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const parser=require('@babel/parser'),traverse=require('@babel/traverse').default;
+const {loadClient}=require('./client-helpers.cjs');
 const source=fs.readFileSync('index.html','utf8').match(/<script type="text\/babel"[^>]*>([\s\S]*?)<\/script>/)[1];
 const ast=parser.parse(source,{sourceType:'module',plugins:['jsx']});
 const nodes={};let authEffect,persistEffect;
@@ -19,7 +20,7 @@ test('UID-scoped draft lifecycle isolates accounts, authorization, transitions a
  env.getProfilePermissions=p=>({canUseOrderBuilder:!!p?.active&&['owner','admin','field_rep'].includes(p.role)});
  const compile=body=>Function(...Object.keys(env),'return '+body)(...Object.values(env));
  env.ORDER_DRAFT_STORAGE_KEY=compile(text('ORDER_DRAFT_STORAGE_KEY'));
- env.validRetailerId=compile(text('validRetailerId'));env.orderDraftKey=compile(text('orderDraftKey'));env.loadOrderDraft=compile(text('loadOrderDraft'));env.clearProtectedDraft=compile(text('clearProtectedDraft'));
+ env.validRetailerId=loadClient().validRetailerId;env.orderDraftKey=compile(text('orderDraftKey'));env.loadOrderDraft=compile(text('loadOrderDraft'));env.clearProtectedDraft=compile(text('clearProtectedDraft'));
  compile(authEffect)();
  const login=(uid,role='owner',active=true)=>{env.auth.currentUser=uid?{uid}:null;authCallback(env.auth.currentUser);assert.deepEqual(state.OrderItems,[]);assert.equal(state.OrderRetailer,'');assert.equal(state.RetailerId,'');if(uid)profileCallback({exists:()=>true,data:()=>({role,active})});};
  const persist=()=>Function(...Object.keys(env),'draftUid','orderItems','orderRetailer','orderEmail','orderNotes','retailerId','return ('+persistEffect+')()')(...Object.values(env),state.DraftUid,state.OrderItems,state.OrderRetailer,state.OrderEmail,state.OrderNotes,state.RetailerId);
