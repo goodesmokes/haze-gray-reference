@@ -29,9 +29,8 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { createRoot } from "react-dom/client";
 import { Plus, X, ChevronRight, ArrowLeft, Pencil, Trash2, Search, Cigarette, Upload, Loader2, Scale, Mail, Copy, ShoppingCart, Minus } from "lucide-react";
-import { initializeApp } from "firebase/app";
-import { getFirestore, doc, getDoc, setDoc, updateDoc, deleteDoc, collection, onSnapshot, getDocs, query, where, orderBy, runTransaction, serverTimestamp } from "firebase/firestore";
-import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from "firebase/auth";
+import { doc, getDoc, setDoc, updateDoc, deleteDoc, collection, onSnapshot, getDocs, query, where, orderBy, runTransaction, serverTimestamp } from "firebase/firestore";
+import { onAuthStateChanged, signInWithEmailAndPassword, signOut } from "firebase/auth";
 import { parseMoney, getNumericPrice, getSinglePrice, computePackageMargins } from "./js/domain/pricing.mjs";
 import { ROLE_LABELS, NO_PERMISSIONS, ROLE_PERMISSIONS, isValidRole, isActiveProfile, getProfilePermissions, getAssignableRoles, canManageAuthorizationProfile, authorizationUpdateError } from "./js/domain/authorization.mjs";
 import { RETAILER_FIELDS, RETAILER_AUTOCOMPLETE, normalizeRetailerName, retailerLocation, normalizeRetailerSearch, retailerSearch, validRetailerId, formatRetailerPhone, validateRetailer, findDuplicateRetailer } from "./js/domain/retailers.mjs";
@@ -39,18 +38,8 @@ import { retailerAssignments, isAssignableRetailerUser, validateRepAssignments, 
 import { territoryDisplay, normalizeTerritory, retailerTerritoryLabel, retailerTerritoryFields, retailerTerritoryOptions, filterRetailerTerritories, territoryMismatches } from "./js/domain/territories.mjs";
 import { nonnegativeMoney, isReadableSavedOrder, buildSavedOrder, buildReorderPlan, mergeReorderItems } from "./js/domain/saved-orders.mjs";
 import { newSizeRow, SEED_CIGARS, EMPTY_FORM, PACK_OPTIONS } from "./js/domain/catalog-data.mjs";
+import { db, auth } from "./js/services/firebase.mjs";
 
-const firebaseConfig = {
-  apiKey: "AIzaSyDYzcHxcQNKUzoJWp4Jd2c67DAvc51N1Pk",
-  authDomain: "haze-gray-cigars.firebaseapp.com",
-  projectId: "haze-gray-cigars",
-  storageBucket: "haze-gray-cigars.firebasestorage.app",
-  messagingSenderId: "691261212011",
-  appId: "1:691261212011:web:34ad8434b4a1c6f1dbb82e"
-};
-const fbApp = initializeApp(firebaseConfig);
-const db = getFirestore(fbApp);
-const auth = getAuth(fbApp);
 const CIGARS_COL = collection(db, "cigars");
 const LEGACY_DOC = doc(db, "app-data", "cigars");
 
