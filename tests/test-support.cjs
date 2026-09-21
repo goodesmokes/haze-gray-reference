@@ -6,6 +6,7 @@ const traverse = require('@babel/traverse').default;
 
 const repositoryRoot = path.join(__dirname, '..');
 const indexPath = path.join(repositoryRoot, 'index.html');
+const appPath = path.join(repositoryRoot, 'js', 'app.jsx');
 
 function readIndexHtml() {
   return fs.readFileSync(indexPath, 'utf8');
@@ -15,10 +16,13 @@ function readRepositoryFile(relativePath) {
   return fs.readFileSync(path.join(repositoryRoot, relativePath), 'utf8');
 }
 
-function extractInlineModule(html = readIndexHtml()) {
-  const match = html.match(/<script type="text\/babel"[^>]*data-type="module"[^>]*>([\s\S]*?)<\/script>/);
-  if (!match) throw new Error('Missing Babel-backed application module in index.html');
-  return match[1];
+function readApplicationModule() {
+  return fs.readFileSync(appPath, 'utf8');
+}
+
+// Retain the established helper name while source assertions transition to the external app entry.
+function extractInlineModule() {
+  return readApplicationModule();
 }
 
 function parseModule(source = extractInlineModule()) {
@@ -52,4 +56,4 @@ async function importNativeModule(specifier) {
   return import(pathToFileURL(path.resolve(repositoryRoot, specifier)).href);
 }
 
-module.exports = { repositoryRoot, indexPath, readIndexHtml, readRepositoryFile, extractInlineModule, parseModule, collectNamedNodes, nodeText, importNativeModule, traverse };
+module.exports = { repositoryRoot, indexPath, appPath, readIndexHtml, readApplicationModule, readRepositoryFile, extractInlineModule, parseModule, collectNamedNodes, nodeText, importNativeModule, traverse };

@@ -1,9 +1,9 @@
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
-const fs=require('node:fs');
 const parser=require('@babel/parser'),traverse=require('@babel/traverse').default;
 const {loadClient}=require('./client-helpers.cjs');
-const source=fs.readFileSync('index.html','utf8').match(/<script type="text\/babel"[^>]*>([\s\S]*?)<\/script>/)[1];
+const {readApplicationModule}=require('./test-support.cjs');
+const source=readApplicationModule();
 const ast=parser.parse(source,{sourceType:'module',plugins:['jsx']});
 const nodes={};let authEffect,persistEffect;
 traverse(ast,{FunctionDeclaration(p){nodes[p.node.id.name]=p.node;},VariableDeclarator(p){nodes[p.node.id.name]=p.node.init;},CallExpression(p){if(p.node.callee.name==='useEffect'){const body=source.slice(p.node.arguments[0].start,p.node.arguments[0].end);if(body.includes('subscribeAuthState'))authEffect=body;if(body.includes('Never persist'))persistEffect=body;}}});

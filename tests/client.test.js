@@ -3,8 +3,8 @@ const {loadClient}=require('./client-helpers.cjs');
 const parser=require('@babel/parser'),traverse=require('@babel/traverse').default;
 const babel={babelParse:code=>parser.parse(code,{sourceType:'module',plugins:['jsx']}),traverse};
 process.chdir(require('node:path').join(__dirname,'..'));
-const source=fs.readFileSync('index.html','utf8').replace(/\r\n/g,'\n').match(/<script type="text\/babel"[^>]*>([\s\S]*?)<\/script>/)[1];
-const original=cp.execFileSync('git',['show','HEAD:index.html'],{encoding:'utf8',maxBuffer:2000000}).replace(/\r\n/g,'\n').match(/<script type="text\/babel"[^>]*>([\s\S]*?)<\/script>/)[1];
+const source=fs.readFileSync('js/app.jsx','utf8').replace(/\r\n/g,'\n');
+let original;try{original=cp.execFileSync('git',['show','HEAD:js/app.jsx'],{encoding:'utf8',maxBuffer:2000000,stdio:['ignore','pipe','ignore']});}catch{original=cp.execFileSync('git',['show','HEAD:index.html'],{encoding:'utf8',maxBuffer:2000000}).match(/<script type="text\/babel"[^>]*>([\s\S]*?)<\/script>/)[1];}original=original.replace(/\r\n/g,'\n');
 const ast=babel.babelParse(source,'index.jsx',true),oldAst=babel.babelParse(original,'index.jsx',true);
 function named(tree,name){let result;babel.traverse(tree,{FunctionDeclaration(p){if(p.node.id.name===name)result=p.node;},VariableDeclarator(p){if(p.node.id.name===name)result=p.node.init;}});assert(result,name);return result;}
 const text=name=>{const n=named(ast,name);return source.slice(n.start,n.end);};
