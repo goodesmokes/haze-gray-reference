@@ -11,6 +11,9 @@ const detailControls = source.slice(nodes.get('DetailOrderControls').start, node
 const comparisonSource = readRepositoryFile('js/components/comparison-view.mjs');
 const comparisonNodes = collectNamedNodes(comparisonSource, (name) => name === 'ComparisonView');
 const comparison = comparisonSource.slice(comparisonNodes.get('ComparisonView').start, comparisonNodes.get('ComparisonView').end);
+const catalogListSource = readRepositoryFile('js/components/catalog-list.mjs');
+const catalogListNodes = collectNamedNodes(catalogListSource, (name) => name === 'CatalogList');
+const catalogList = catalogListSource.slice(catalogListNodes.get('CatalogList').start, catalogListNodes.get('CatalogList').end);
 const rootVariables = new Map();
 traverse(ast, {
   VariableDeclarator(path) {
@@ -54,8 +57,8 @@ test('catalog grouping preserves alphabetical line order, item counts and final 
     ['Bravo', ['b1', 'b2']],
     ['Uncategorized', ['u']]
   ]);
-  assert.match(root, /\{group\.items\.length\}/);
-  assert.match(root, /filtered\.length === 0[\s\S]*?No matches for that search\./);
+  assert.match(catalogList, /group\.items\.length/);
+  assert.match(catalogList, /filtered\.length === 0[\s\S]*?No matches for that search\./);
 });
 
 test('catalog compare mode preserves click routing, three-item limit and compare button gates', () => {
@@ -66,12 +69,13 @@ test('catalog compare mode preserves click routing, three-item limit and compare
   assert.deepEqual(update(['a', 'b', 'c']), ['b', 'c', 'd']);
   assert.deepEqual(update(['a', 'b']), ['a', 'b', 'd']);
   assert.deepEqual(update(['a', 'd']), ['a']);
-  assert.match(root, /onClick=\{\(\) => \(compareMode \? toggleCompareId\(c\.id\) : setSelectedId\(c\.id\)\)\}/);
-  assert.match(root, /const isChecked = compareIds\.includes\(c\.id\)/);
-  assert.match(root, /compareMode && compareIds\.length >= 2 && \(/);
-  assert.match(root, /\{compareIds\.length\} cigars selected/);
-  assert.match(root, /onClick=\{\(\) => setShowCompare\(true\)\}/);
-  assert.match(root, /\{compareMode \? "Cancel Compare" : "Compare"\}/);
+  assert.match(catalogList, /onClick: \(\) => compareMode \? onToggleCompareId\(c\.id\) : onSelectCigar\(c\.id\)/);
+  assert.match(catalogList, /const isChecked = compareIds\.includes\(c\.id\)/);
+  assert.match(catalogList, /compareMode && compareIds\.length >= 2 && h\("div"/);
+  assert.match(catalogList, /compareIds\.length, " cigars selected"/);
+  assert.match(catalogList, /onClick: onCompare/);
+  assert.match(catalogList, /compareMode \? "Cancel Compare" : "Compare"/);
+  assert.match(root, /<CatalogList[\s\S]*?onToggleCompareId=\{toggleCompareId\}[\s\S]*?onCompare=\{\(\) => setShowCompare\(true\)\}/);
 });
 
 test('comparison preserves ID order, fallback values, pricing economics and callbacks', async () => {
@@ -100,6 +104,17 @@ test('app imports the extracted comparison without retaining a duplicate impleme
   assert.deepEqual([...comparisonNodes.keys()], ['ComparisonView']);
   assert.match(comparisonSource, /export function ComparisonView/);
   assert.doesNotMatch(root, /Sales Comparison|Best Retail Margin|Best Box \/ Bundle Profit/);
+});
+
+test('app imports the extracted catalog list without retaining a duplicate implementation', () => {
+  const imports = ast.program.body.filter((node) => node.type === 'ImportDeclaration');
+  const catalogListImport = imports.find((node) => node.source.value === './js/components/catalog-list.mjs');
+  assert.deepEqual(catalogListImport.specifiers.map((node) => node.imported.name), ['CatalogList']);
+  assert.deepEqual([...collectNamedNodes(source, (name) => name === 'CatalogList').keys()], []);
+  assert.deepEqual([...catalogListNodes.keys()], ['CatalogList']);
+  assert.match(catalogListSource, /export function CatalogList/);
+  assert.match(root, /<CatalogList cigars=\{cigars\} filtered=\{filtered\} groupedFiltered=\{groupedFiltered\}/);
+  assert.doesNotMatch(root, /Search by name, wrapper, vitola, tasting note|No cigars logged yet|Sort: Strength/);
 });
 
 test('cigar detail preserves identity, fallbacks, display wiring and permission gates', () => {

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { createRoot } from "react-dom/client";
-import { Plus, X, ChevronRight, ArrowLeft, Pencil, Trash2, Search, Cigarette, Upload, Loader2, Scale, Mail, Copy, ShoppingCart, Minus } from "lucide-react";
+import { Plus, X, ChevronRight, ArrowLeft, Pencil, Trash2, Cigarette, Upload, Loader2, Mail, Copy, ShoppingCart, Minus } from "lucide-react";
 import { doc, collection, onSnapshot } from "firebase/firestore";
 import { parseMoney, getNumericPrice, getSinglePrice, computePackageMargins } from "./js/domain/pricing.mjs";
 import { ROLE_LABELS, NO_PERMISSIONS, ROLE_PERMISSIONS, isValidRole, isActiveProfile, getProfilePermissions } from "./js/domain/authorization.mjs";
@@ -18,6 +18,7 @@ import { Gauge, Tag } from "./js/components/common-ui.mjs";
 import { AuthorizationProfileEditor, AuthorizedUsers } from "./js/components/authorization-ui.mjs";
 import { RetailerDirectory } from "./js/components/retailer-directory.mjs";
 import { ComparisonView } from "./js/components/comparison-view.mjs";
+import { CatalogList } from "./js/components/catalog-list.mjs";
 
 // Application authorization only. Firestore Security Rules remain the enforcement boundary.
 
@@ -2240,151 +2241,7 @@ const text = [
           </div>
         </div>
       ) : (
-        // ---------- LIST VIEW ----------
-        <div style={{ maxWidth: 900, margin: "0 auto", padding: "20px 24px" }}>
-          <div style={{ position: "relative", marginBottom: 12 }}>
-            <Search size={16} color="#8A93A0" style={{ position: "absolute", left: 12, top: 12 }} />
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search by name, wrapper, vitola, tasting note…"
-              style={{
-                width: "100%", background: "#1c1f24", border: "1px solid #454b53", borderRadius: 5,
-                padding: "10px 12px 10px 36px", color: "#EDE6D6", fontSize: 14,
-              }}
-            />
-          </div>
-
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 18 }}>
-            <select
-              value={strengthFilter}
-              onChange={(e) => setStrengthFilter(e.target.value)}
-              style={{
-                background: "#1c1f24", border: "1px solid #454b53", borderRadius: 5, color: "#C9CFD6",
-                fontFamily: "'Oswald', sans-serif", fontSize: 12.5, padding: "8px 10px",
-              }}
-            >
-              <option value="all">All Strengths</option>
-              <option value="1">Mild</option>
-              <option value="2">Mild-Medium</option>
-              <option value="3">Medium</option>
-              <option value="4">Medium-Full</option>
-              <option value="5">Full</option>
-            </select>
-            <select
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value)}
-              style={{
-                background: "#1c1f24", border: "1px solid #454b53", borderRadius: 5, color: "#C9CFD6",
-                fontFamily: "'Oswald', sans-serif", fontSize: 12.5, padding: "8px 10px",
-              }}
-            >
-              <option value="name">Sort: Name (A–Z)</option>
-              <option value="strength-asc">Sort: Strength (Mild → Full)</option>
-              <option value="strength-desc">Sort: Strength (Full → Mild)</option>
-              <option value="body-asc">Sort: Body (Light → Full)</option>
-              <option value="body-desc">Sort: Body (Full → Light)</option>
-            </select>
-            <button
-              type="button"
-              className="hg-btn"
-              onClick={() => setCompareMode((m) => !m)}
-              style={{
-                display: "flex", alignItems: "center", gap: 6,
-                background: compareMode ? "#B8894C" : "none",
-                color: compareMode ? "#14161A" : "#C9CFD6",
-                border: compareMode ? "1px solid #B8894C" : "1px solid #6E7681",
-                borderRadius: 5, padding: "8px 14px", fontFamily: "'Oswald', sans-serif",
-                fontSize: 12.5, fontWeight: 600, letterSpacing: 0.5, textTransform: "uppercase",
-              }}
-            >
-              <Scale size={14} /> {compareMode ? "Cancel Compare" : "Compare"}
-            </button>
-          </div>
-
-          {filtered.length === 0 ? (
-            <div style={{ padding: "40px 0", textAlign: "center", color: "#8A93A0", fontFamily: "'Oswald', sans-serif" }}>
-              {cigars.length === 0 ? "No cigars logged yet. Add your first one." : "No matches for that search."}
-            </div>
-          ) : (
-            <div className="hg-scroll" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {groupedFiltered.map((group) => (
-                <React.Fragment key={group.name}>
-                  <div style={{
-                    display: "flex", alignItems: "center", gap: 10, margin: "14px 0 2px",
-                  }}>
-                    <div style={{
-                      fontFamily: "'Oswald', sans-serif", fontSize: 12.5, letterSpacing: 2, color: "#B8894C",
-                      textTransform: "uppercase", whiteSpace: "nowrap",
-                    }}>{group.name}</div>
-                    <div style={{ flex: 1, height: 1, background: "#2c3036" }} />
-                    <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: "#5c636b" }}>{group.items.length}</div>
-                  </div>
-                  {group.items.map((c) => {
-                    const isChecked = compareIds.includes(c.id);
-                    return (
-                <div key={c.id} className="hg-row" onClick={() => (compareMode ? toggleCompareId(c.id) : setSelectedId(c.id))} style={{
-                  display: "flex", alignItems: "center", gap: 16, cursor: "pointer",
-                  border: isChecked ? "1px solid #B8894C" : "1px solid #2c3036", borderRadius: 6, padding: "12px 16px",
-                  background: isChecked ? "rgba(184,137,76,0.08)" : "rgba(255,255,255,0.015)", transition: "background 0.15s, border-color 0.15s",
-                }}>
-                  {compareMode ? (
-                    <div style={{
-                      width: 20, height: 20, flex: "0 0 20px", borderRadius: 4,
-                      border: isChecked ? "none" : "1px solid #6E7681",
-                      background: isChecked ? "#B8894C" : "transparent",
-                      display: "flex", alignItems: "center", justifyContent: "center",
-                    }}>
-                      {isChecked && <span style={{ color: "#14161A", fontSize: 13, fontWeight: 700 }}>✓</span>}
-                    </div>
-                  ) : (
-                    <Cigarette size={16} color="#454b53" style={{ flex: "0 0 16px" }} />
-                  )}
-                  <div style={{
-                    width: 44, height: 44, borderRadius: 4, background: "#0e0d0b", flex: "0 0 44px",
-                    display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden",
-                    border: "1px solid #3B2A1E",
-                  }}>
-                    {c.imageUrl ? <img src={c.imageUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <Cigarette size={20} color="#454b53" />}
-                  </div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 20, letterSpacing: 0.5, lineHeight: 1.1 }}>{c.name}</div>
-                    <div style={{ fontFamily: "'Oswald', sans-serif", fontSize: 12, color: "#8A93A0", letterSpacing: 0.5 }}>
-                      {sizeSummary(c)} · {c.wrapper}
-                    </div>
-                  </div>
-                  <div style={{
-                    fontFamily: "'Oswald', sans-serif", fontSize: 11, letterSpacing: 1, textTransform: "uppercase",
-                    color: "#E7C79A", border: "1px solid #B8894C", borderRadius: 3, padding: "3px 8px", whiteSpace: "nowrap",
-                  }}>{strengthWord(c.strength)}</div>
-                  {!compareMode && <ChevronRight size={18} color="#454b53" />}
-                </div>
-                    );
-                  })}
-                </React.Fragment>
-              ))}
-            </div>
-          )}
-
-          {compareMode && compareIds.length >= 2 && (
-            <div style={{
-              position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)",
-              background: "#1c1f24", border: "1px solid #B8894C", borderRadius: 8,
-              padding: "14px 20px", display: "flex", alignItems: "center", gap: 16,
-              boxShadow: "0 8px 24px rgba(0,0,0,0.5)", zIndex: 40,
-            }}>
-              <div style={{ fontFamily: "'Oswald', sans-serif", fontSize: 13, color: "#EDE6D6" }}>
-               {compareIds.length} cigars selected
-              </div>
-              <button className="hg-btn" onClick={() => setShowCompare(true)} style={{
-                background: "#B8894C", border: "none", color: "#14161A", borderRadius: 4,
-                padding: "8px 16px", fontFamily: "'Oswald', sans-serif", fontWeight: 600, fontSize: 12.5,
-              }}>
-                Compare →
-              </button>
-            </div>
-          )}
-        </div>
+        <CatalogList cigars={cigars} filtered={filtered} groupedFiltered={groupedFiltered} query={query} onQueryChange={setQuery} strengthFilter={strengthFilter} onStrengthFilterChange={setStrengthFilter} sortBy={sortBy} onSortChange={setSortBy} compareMode={compareMode} onToggleCompareMode={() => setCompareMode((mode) => !mode)} compareIds={compareIds} onSelectCigar={setSelectedId} onToggleCompareId={toggleCompareId} onCompare={() => setShowCompare(true)} strengthWord={strengthWord} sizeSummary={sizeSummary} />
       )}
 
       {/* ---------- ADD/EDIT FORM MODAL ---------- */}
