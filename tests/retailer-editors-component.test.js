@@ -1,30 +1,35 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { loadClient } = require('./client-helpers.cjs');
-const { collectNamedNodes, parseModule, readApplicationModule, traverse } = require('./test-support.cjs');
+const { collectNamedNodes, parseModule, readApplicationModule, readRepositoryFile, traverse } = require('./test-support.cjs');
 
-const source = readApplicationModule();
-const ast = parseModule(source);
-const names = ['RetailerPhoneInput', 'RepAssignmentChoices', 'RetailerAssignmentEditor', 'RetailerEditor', 'RetailerDirectory'];
-const nodes = collectNamedNodes(source, (name) => names.includes(name));
+const appSource = readApplicationModule();
+const editorSource = readRepositoryFile('js/components/retailer-editors.mjs');
+const appAst = parseModule(appSource);
+const editorAst = parseModule(editorSource);
+const editorNames = ['RetailerPhoneInput', 'RepAssignmentChoices', 'RetailerAssignmentEditor', 'RetailerEditor'];
+const appNodes = collectNamedNodes(appSource, (name) => name === 'RetailerDirectory');
+const editorNodes = collectNamedNodes(editorSource, (name) => editorNames.includes(name));
 const client = loadClient();
 
 function componentSource(name) {
-  const node = nodes.get(name);
-  assert(node, `${name} must remain declared in js/app.jsx`);
+  const isDirectory = name === 'RetailerDirectory';
+  const source = isDirectory ? appSource : editorSource;
+  const node = (isDirectory ? appNodes : editorNodes).get(name);
+  assert(node, `${name} must remain declared in its expected module`);
   return source.slice(node.start, node.end);
 }
 
 function stateInitializer(componentName, stateName) {
   let initializer;
-  traverse(ast, {
+  traverse(editorAst, {
     CallExpression(path) {
       if (path.node.callee.name !== 'useState' || path.getFunctionParent()?.node.id?.name !== componentName) return;
       if (path.parentPath.node.id?.elements?.[0]?.name === stateName) initializer = path.node.arguments[0];
     }
   });
   assert(initializer, `${componentName}.${stateName} initializer`);
-  return source.slice(initializer.start, initializer.end);
+  return editorSource.slice(initializer.start, initializer.end);
 }
 
 test('RetailerEditor initializes each edit target independently and preserves creation defaults', () => {
@@ -60,8 +65,8 @@ test('RetailerEditor preserves busy, mounted, duplicate and navigation behavior'
   assert.match(editor, /if \(mounted\.current && auth\.currentUser\?\.uid === currentUid && requirePermission\("canUseRetailers"\)\) onSaved\(id\)/);
   assert.match(editor, /if \(mounted\.current\) \{ setError\(failure\.message\); setDuplicateId\(failure\.retailerId \|\| null\); \}/);
   assert.match(editor, /finally \{ busy\.current = false; if \(mounted\.current\) setSaving\(false\); \}/);
-  assert.match(editor, /duplicateId && <button type="button"[\s\S]*?onClick=\{\(\) => onOpenExisting\(duplicateId\)\}>Open Existing Retailer<\/button>/);
-  assert.match(editor, /disabled=\{saving\}>\{saving \? "Saving…" : "Save Retailer"\}/);
+  assert.match(editor, /duplicateId && h\("button", \{ type: "button",[\s\S]*?onClick: \(\) => onOpenExisting\(duplicateId\) \}, "Open Existing Retailer"\)/);
+  assert.match(editor, /h\("button", \{ className: "hg-btn", style: userButtonStyle, disabled: saving \}, saving \? "Saving…" : "Save Retailer"\)/);
 });
 
 test('phone input and RetailerEditor preserve formatting, cursor and autocomplete wiring', () => {
@@ -74,18 +79,17 @@ test('phone input and RetailerEditor preserve formatting, cursor and autocomplet
   assert.match(phone, /event\.nativeEvent\?\.isComposing/);
   assert.match(phone, /onChange\(preserve \? next : formatRetailerPhone\(next, country\)\)/);
   assert.match(phone, /onBlur: \(event\) => onChange\(formatRetailerPhone\(event\.target\.value, country\)\)/);
-  assert.match(editor, /<RetailerPhoneInput value=\{form\.phone\} country=\{form\.country\} disabled=\{saving\}/);
-  assert.match(editor, /autoComplete=\{RETAILER_AUTOCOMPLETE\[key\]\}/);
+  assert.match(editor, /h\(RetailerPhoneInput, \{ value: form\.phone, country: form\.country, disabled: saving/);
+  assert.match(editor, /autoComplete: RETAILER_AUTOCOMPLETE\[key\]/);
 });
 
 test('RetailerEditor preserves territory initialization, options and role gates', () => {
   const editor = componentSource('RetailerEditor');
 
   assert.match(editor, /useState\(\(\) => territoryDisplay\(retailer\?\.territory\)\)/);
-  assert.match(editor, /canEditTerritory \? <label[\s\S]*?aria-label="Retailer territory" autoComplete="off" list="retailer-territory-options"/);
-  assert.match(editor, /territoryOptions\.map\(\(option\) => <option key=\{option\.value\} value=\{option\.label\} \/>\)/);
-  assert.match(editor, /retailer \? retailerTerritoryLabel\(retailer\) : territoryDisplay\(homeTerritory\) \|\| "Unassigned Territory"/);
-  assert.match(editor, /!retailer && " \(from your current user profile\)"/);
+  assert.match(editor, /canEditTerritory \? h\("label"[\s\S]*?"aria-label": "Retailer territory", autoComplete: "off", list: "retailer-territory-options"/);
+  assert.match(editor, /territoryOptions\.map\(\(option\) => h\("option", \{ key: option\.value, value: option\.label \}\)\)/);
+  assert.match(editor, /retailer \? retailerTerritoryLabel\(retailer\) : territoryDisplay\(homeTerritory\) \|\| "Unassigned Territory", !retailer && " \(from your current user profile\)"/);
   assert.match(editor, /\.\.\.\(canEditTerritory \? \{ territory \} : \{\}\)/);
   assert.equal(client.territoryDisplay(' United States '), 'United States');
   assert.deepEqual(client.retailerTerritoryOptions([], [], { territory: 'United States' }), [{ value: 'united states', label: 'United States' }]);
@@ -116,9 +120,9 @@ test('assignment choices retain stale UIDs, gate additions by eligibility and pr
   assert.match(choices, /repDirectory\.profiles\.filter\(\(profile\) => isAssignableRetailerUser\(profile\) \|\| value\.includes\(profile\.uid\)\)/);
   assert.match(choices, /const missing = value\.filter\(\(uid\) => !choices\.some\(\(profile\) => profile\.uid === uid\)\)/);
   assert.match(choices, /\[\.\.\.choices\.map\(\(profile\) => profile\.uid\), \.\.\.missing\]/);
-  assert.match(choices, /disabled=\{!value\.includes\(uid\) && \(!repDirectory\.ready \|\| Boolean\(repDirectory\.error\) \|\| value\.length >= 10\)\}/);
+  assert.match(choices, /disabled: !value\.includes\(uid\) && \(!repDirectory\.ready \|\| Boolean\(repDirectory\.error\) \|\| value\.length >= 10\)/);
   assert.match(choices, /event\.target\.checked \? \[\.\.\.value, uid\] : value\.filter\(\(id\) => id !== uid\)/);
-  assert.match(choices, /repDirectory\.error && <p role="alert">\{repDirectory\.error\}[\s\S]*?onClick=\{repDirectory\.reload\}>Retry<\/button>/);
+  assert.match(choices, /repDirectory\.error && h\("p", \{ role: "alert" \}, repDirectory\.error,[\s\S]*?onClick: repDirectory\.reload \}, "Retry"\)/);
   assert.match(choices, /No active Owners, Admins, or Field Reps are available\./);
 });
 
@@ -132,6 +136,20 @@ test('RetailerDirectory preserves conditional unmount/remount identity boundarie
   assert.doesNotMatch(directory, /<Retailer(?:Assignment)?Editor key=/);
 });
 
-test('retailer editor components remain local during Phase 7D-Prep', () => {
-  for (const name of names.slice(0, 4)) assert(nodes.has(name), name);
+test('app imports all editor exports and no duplicate local implementations remain', () => {
+  const editorImport = appAst.program.body.find((node) => node.type === 'ImportDeclaration' && node.source.value === './js/components/retailer-editors.mjs');
+  assert(editorImport, 'retailer editor import');
+  assert.deepEqual(editorImport.specifiers.map((node) => [node.imported.name, node.local.name]), editorNames.map((name) => [name, name]));
+
+  const localDeclarations = collectNamedNodes(appSource, (name) => editorNames.includes(name));
+  assert.deepEqual([...localDeclarations.keys()], []);
+
+  const exported = [];
+  traverse(editorAst, {
+    ExportNamedDeclaration(path) {
+      const name = path.node.declaration?.id?.name;
+      if (name) exported.push(name);
+    }
+  });
+  assert.deepEqual(exported, editorNames);
 });

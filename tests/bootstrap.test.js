@@ -32,6 +32,7 @@ test('index.html remains the application entry point with its React root and mou
   assert(imports.some((node) => node.source.value === './js/ui/styles.mjs'));
   assert(imports.some((node) => node.source.value === './js/components/common-ui.mjs'));
   assert(imports.some((node) => node.source.value === './js/components/authorization-ui.mjs'));
+  assert(imports.some((node) => node.source.value === './js/components/retailer-editors.mjs'));
 
   let rootLookup = false, appMount = false;
   traverse(ast, {

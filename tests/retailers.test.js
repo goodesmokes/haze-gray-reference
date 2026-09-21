@@ -2,7 +2,7 @@ const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs'),cp=require('node:child_process');
 const {loadClient}=require('./client-helpers.cjs');
-const {importNativeModule,readApplicationModule}=require('./test-support.cjs');
+const {importNativeModule,readApplicationModule,readRepositoryFile}=require('./test-support.cjs');
 let createRetailerService;
 test.before(async()=>{({createRetailerService}=await importNativeModule('js/services/retailer-service.mjs'));});
 const client=loadClient();
@@ -10,7 +10,10 @@ const parser=require('@babel/parser'),traverse=require('@babel/traverse').defaul
 const source=readApplicationModule();
 const ast=parser.parse(source,{sourceType:'module',plugins:['jsx']}),nodes={};
 traverse(ast,{FunctionDeclaration(p){nodes[p.node.id.name]=p.node;},VariableDeclarator(p){if(p.node.id.name !== 'filtered' || p.getFunctionParent()?.node.id?.name === 'OrderHistory') nodes[p.node.id.name]=p.node.init;}});
-const text=name=>source.slice(nodes[name].start,nodes[name].end);
+const editorSource=readRepositoryFile('js/components/retailer-editors.mjs');
+const editorAst=parser.parse(editorSource,{sourceType:'module',plugins:['jsx']}),editorNodes={};
+traverse(editorAst,{FunctionDeclaration(p){editorNodes[p.node.id.name]=p.node;}});
+const text=name=>{const node=editorNodes[name]||nodes[name],value=editorNodes[name]?editorSource:source;return value.slice(node.start,node.end);};
 const form={...Object.fromEntries(Object.keys(client.RETAILER_FIELDS).map(key=>[key,''])),name:'  Harbor Shop  ',active:true};
 test('directory cards render normalized location only when available',()=>{
  const ui=loadClient({React:{createElement:(tag,props,child)=>({tag,props,child})}});
@@ -130,9 +133,9 @@ test('retailer form identifies address fields while keeping territory out of bro
  const autocomplete=client.RETAILER_AUTOCOMPLETE;
  assert.deepEqual(autocomplete,{contactName:'name',email:'email',phone:'tel',address1:'address-line1',address2:'address-line2',city:'address-level2',state:'address-level1',postalCode:'postal-code',country:'country-name',website:'url'});
  const editor=text('RetailerEditor');
- assert.match(editor,/autoComplete=\{RETAILER_AUTOCOMPLETE\[key\]\}/);
- assert.match(editor,/aria-label="Retailer territory" autoComplete="off" list="retailer-territory-options"/);
- assert.match(editor,/onChange=\{\(e\) => setForm\(\{ \.\.\.form, \[key\]: e\.target\.value \}\)\}/);
+ assert.match(editor,/autoComplete: RETAILER_AUTOCOMPLETE\[key\]/);
+ assert.match(editor,/"aria-label": "Retailer territory", autoComplete: "off", list: "retailer-territory-options"/);
+ assert.match(editor,/onChange: \(e\) => setForm\(\{ \.\.\.form, \[key\]: e\.target\.value \}\)/);
  assert.doesNotMatch(editor,/address2\s*:\s*form\.address1|address1\s*:\s*form\.address2/);
  const phone=loadClient({React:{createElement:(tag,props)=>({tag,props})},userFieldStyle:{}}).RetailerPhoneInput({value:'',country:'US',onChange:()=>{}});
  assert.equal(phone.props.autoComplete,'tel');
@@ -140,14 +143,14 @@ test('retailer form identifies address fields while keeping territory out of bro
 
 test('existing retailer phones format on edit, display and save through shared helper',()=>{
  let initializer;
- traverse(ast,{CallExpression(p){if(p.node.callee.name==='useState' && p.getFunctionParent()?.node.id?.name==='RetailerEditor' && p.node.arguments[0]?.type==='ArrowFunctionExpression' && p.parentPath.node.id?.elements?.[0]?.name==='form')initializer=p.node.arguments[0];}});
- const initialize=Function('retailer','RETAILER_FIELDS','formatRetailerPhone','return ('+source.slice(initializer.start,initializer.end)+')()');
+ traverse(editorAst,{CallExpression(p){if(p.node.callee.name==='useState' && p.getFunctionParent()?.node.id?.name==='RetailerEditor' && p.node.arguments[0]?.type==='ArrowFunctionExpression' && p.parentPath.node.id?.elements?.[0]?.name==='form')initializer=p.node.arguments[0];}});
+ const initialize=Function('retailer','RETAILER_FIELDS','formatRetailerPhone','return ('+editorSource.slice(initializer.start,initializer.end)+')()');
  assert.equal(initialize({phone:'5551234567',country:'US'},client.RETAILER_FIELDS,client.formatRetailerPhone).phone,'(555) 123-4567');
  assert.equal(initialize(null,client.RETAILER_FIELDS,client.formatRetailerPhone).phone,'');
  assert.equal(initialize({phone:'5551234567',country:'France'},client.RETAILER_FIELDS,client.formatRetailerPhone).phone,'5551234567');
  assert.equal(client.validateRetailer({...form,phone:'5551234567'}).phone,'(555) 123-4567');
  assert.equal(client.validateRetailer({...form,phone:'5551234567',country:'France'}).phone,'5551234567');
- assert.match(text('RetailerEditor'),/<RetailerPhoneInput value=\{form.phone\} country=\{form.country\}/);
+ assert.match(text('RetailerEditor'),/h\(RetailerPhoneInput, \{ value: form.phone, country: form.country/);
  assert.match(text('RetailerDirectory'),/formatRetailerPhone\(selected.phone, selected.country\)/);
  assert.match(text('RetailerDirectory'),/formatRetailerPhone\(item.phone, item.country\)/);
 });

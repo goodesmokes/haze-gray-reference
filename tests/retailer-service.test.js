@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { collectNamedNodes, extractInlineModule, importNativeModule, parseModule } = require('./test-support.cjs');
+const { collectNamedNodes, extractInlineModule, importNativeModule, parseModule, readRepositoryFile } = require('./test-support.cjs');
 
 const baseForm = {
   name: 'Harbor Shop', contactName: '', email: '', phone: '', address1: '', address2: '',
@@ -232,17 +232,20 @@ test('duplicate detection remains advisory and outside the transaction', async (
   assert.equal(fixture.writes.length, 0);
 });
 
-test('index imports retailer service without duplicate declarations', () => {
+test('app and retailer editors import retailer service without duplicate declarations', () => {
   const source = extractInlineModule();
   const ast = parseModule(source);
   const serviceImport = ast.program.body.find((node) => node.type === 'ImportDeclaration' && node.source.value === './js/services/retailer-service.mjs');
   assert(serviceImport, 'retailer service import');
   assert.deepEqual(serviceImport.specifiers.map((node) => node.imported.name), [
-    'saveRetailerAssignments',
-    'saveRetailerProfile',
     'subscribeAssignmentProfiles',
     'subscribeRetailerDirectory'
   ]);
+  const editorSource = readRepositoryFile('js/components/retailer-editors.mjs');
+  const editorAst = parseModule(editorSource);
+  const editorServiceImport = editorAst.program.body.find((node) => node.type === 'ImportDeclaration' && node.source.value === '../services/retailer-service.mjs');
+  assert(editorServiceImport, 'retailer editor service import');
+  assert.deepEqual(editorServiceImport.specifiers.map((node) => node.imported.name), ['saveRetailerAssignments', 'saveRetailerProfile']);
   const localNodes = collectNamedNodes(source, (name) => ['checkNewRepAssignments', 'saveRetailerAssignments', 'saveRetailerProfile'].includes(name));
   assert.deepEqual([...localNodes.keys()], []);
 });

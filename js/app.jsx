@@ -4,20 +4,21 @@ import { Plus, X, ChevronRight, ArrowLeft, Pencil, Trash2, Search, Cigarette, Up
 import { doc, collection, onSnapshot } from "firebase/firestore";
 import { parseMoney, getNumericPrice, getSinglePrice, computePackageMargins } from "./js/domain/pricing.mjs";
 import { ROLE_LABELS, NO_PERMISSIONS, ROLE_PERMISSIONS, isValidRole, isActiveProfile, getProfilePermissions } from "./js/domain/authorization.mjs";
-import { RETAILER_FIELDS, RETAILER_AUTOCOMPLETE, normalizeRetailerName, retailerLocation, normalizeRetailerSearch, retailerSearch, validRetailerId, formatRetailerPhone, validateRetailer, findDuplicateRetailer } from "./js/domain/retailers.mjs";
+import { RETAILER_FIELDS, normalizeRetailerName, retailerLocation, normalizeRetailerSearch, retailerSearch, validRetailerId, formatRetailerPhone, validateRetailer, findDuplicateRetailer } from "./js/domain/retailers.mjs";
 import { retailerAssignments, isAssignableRetailerUser, validateRepAssignments, assignedRepLabel, assignmentSummary, filterRetailerAssignments } from "./js/domain/assignments.mjs";
-import { territoryDisplay, normalizeTerritory, retailerTerritoryLabel, retailerTerritoryFields, retailerTerritoryOptions, filterRetailerTerritories, territoryMismatches } from "./js/domain/territories.mjs";
+import { normalizeTerritory, retailerTerritoryLabel, retailerTerritoryFields, retailerTerritoryOptions, filterRetailerTerritories, territoryMismatches } from "./js/domain/territories.mjs";
 import { nonnegativeMoney, isReadableSavedOrder, buildSavedOrder, buildReorderPlan, mergeReorderItems } from "./js/domain/saved-orders.mjs";
 import { newSizeRow, SEED_CIGARS, EMPTY_FORM, PACK_OPTIONS } from "./js/domain/catalog-data.mjs";
 import { db, auth } from "./js/services/firebase.mjs";
 import { subscribeCatalog, isLegacyCatalogMigrationAvailable, saveCatalogRecord, deleteCatalogRecord, readLegacyCatalog } from "./js/services/catalog-service.mjs";
 import { savePendingOrder, subscribeOrderHistory } from "./js/services/order-service.mjs";
-import { saveRetailerAssignments, saveRetailerProfile, subscribeAssignmentProfiles, subscribeRetailerDirectory } from "./js/services/retailer-service.mjs";
+import { subscribeAssignmentProfiles, subscribeRetailerDirectory } from "./js/services/retailer-service.mjs";
 import { saveAuthorizationProfile as saveAuthorizationProfileService } from "./js/services/profile-service.mjs";
 import { signInWithEmail, signOutUser, subscribeAuthState } from "./js/services/auth-service.mjs";
 import { userFieldStyle, userButtonStyle } from "./js/ui/styles.mjs";
 import { Gauge, Tag, RetailerLocation } from "./js/components/common-ui.mjs";
 import { AuthorizationProfileEditor, AuthorizedUsers } from "./js/components/authorization-ui.mjs";
+import { RetailerPhoneInput, RepAssignmentChoices, RetailerAssignmentEditor, RetailerEditor } from "./js/components/retailer-editors.mjs";
 
 // Application authorization only. Firestore Security Rules remain the enforcement boundary.
 
@@ -245,19 +246,6 @@ const retailerOrderFields = (retailer) => {
   if (!retailer?.active || !validRetailerId(retailer.id)) throw new Error("This retailer is no longer available for new orders.");
   return { retailerId: retailer.id, orderRetailer: retailer.name, orderEmail: retailer.email };
 };
-function RetailerPhoneInput({ value, country, disabled, onChange }) {
-  return React.createElement("input", {
-    "aria-label": "Phone", type: "tel", autoComplete: "tel", value, maxLength: 500, disabled,
-    style: { ...userFieldStyle, boxSizing: "border-box" },
-    onChange: (event) => {
-      const next = event.target.value;
-      // Leave middle edits, deletions and IME composition untouched until blur.
-      const preserve = event.target.selectionStart !== next.length || event.nativeEvent?.inputType?.startsWith("delete") || event.nativeEvent?.isComposing;
-      onChange(preserve ? next : formatRetailerPhone(next, country));
-    },
-    onBlur: (event) => onChange(formatRetailerPhone(event.target.value, country))
-  });
-}
 function useAssignmentProfiles(user, enabled) {
   const scope = enabled ? user.uid : "";
   const [state, setState] = useState({ scope: "", profiles: [], ready: false, error: "" });
@@ -273,41 +261,6 @@ function useAssignmentProfiles(user, enabled) {
     return () => { live = false; stop(); };
   }, [scope, retry]);
   return { ...(scope && state.scope === scope ? state : { profiles: [], ready: false, error: "" }), reload: () => setRetry((value) => value + 1) };
-}
-function RepAssignmentChoices({ value, onChange, repDirectory, disabled }) {
-  const choices = repDirectory.profiles.filter((profile) => isAssignableRetailerUser(profile) || value.includes(profile.uid));
-  const missing = value.filter((uid) => !choices.some((profile) => profile.uid === uid));
-  return <fieldset disabled={disabled} style={{ border: "1px solid #555", padding: 12, margin: "16px 0", overflowWrap: "anywhere" }}>
-    <legend>Assigned Users ({value.length}/10)</legend>
-    {!value.length && <p>Unassigned</p>}
-    {!repDirectory.ready && <p>Loading assignment profiles…</p>}
-    {repDirectory.error && <p role="alert">{repDirectory.error} <button type="button" className="hg-btn" style={userButtonStyle} onClick={repDirectory.reload}>Retry</button></p>}
-    {repDirectory.ready && !repDirectory.error && !repDirectory.profiles.some(isAssignableRetailerUser) && <p>No active Owners, Admins, or Field Reps are available.</p>}
-    {[...choices.map((profile) => profile.uid), ...missing].map((uid) => <label key={uid} style={{ display: "block", margin: "8px 0" }}><input type="checkbox" checked={value.includes(uid)} disabled={!value.includes(uid) && (!repDirectory.ready || Boolean(repDirectory.error) || value.length >= 10)} onChange={(event) => onChange(event.target.checked ? [...value, uid] : value.filter((id) => id !== uid))} /> {assignedRepLabel(uid, "", true, repDirectory.profiles)}</label>)}
-    <p style={{ color: "#8A93A0", marginBottom: 0 }}>Assignments indicate responsibility. All active retailers remain shared.</p>
-  </fieldset>;
-}
-function RetailerAssignmentEditor({ retailer, user, repDirectory, requirePermission, onClose }) {
-  const [expected] = useState(() => [...retailerAssignments(retailer)]);
-  const [value, setValue] = useState(expected);
-  const [error, setError] = useState("");
-  const [saving, setSaving] = useState(false);
-  const busy = useRef(false), mounted = useRef(true);
-  useEffect(() => () => { mounted.current = false; }, []);
-  const submit = async (event) => {
-    event.preventDefault();
-    if (busy.current) return;
-    busy.current = true; setSaving(true); setError("");
-    try { await saveRetailerAssignments(retailer.id, value, expected, user.uid, requirePermission); if (mounted.current) onClose(); }
-    catch (failure) { if (mounted.current) setError(failure.message); }
-    finally { busy.current = false; if (mounted.current) setSaving(false); }
-  };
-  return <div role="dialog" aria-modal="true" aria-label="Edit Assigned Users" style={{ position: "fixed", inset: 0, zIndex: 66, background: "rgba(0,0,0,0.7)", display: "grid", placeItems: "center", padding: 16 }}><form onSubmit={submit} className="hg-scroll" style={{ background: "#1c1f24", border: "1px solid #B8894C", borderRadius: 8, padding: 20, width: "100%", boxSizing: "border-box", maxWidth: 640, maxHeight: "85vh", overflowY: "auto" }}>
-    <h2>Assigned Users — {retailer.name}</h2>
-    <RepAssignmentChoices value={value} onChange={setValue} repDirectory={repDirectory} disabled={saving} />
-    {error && <p role="alert" style={{ color: "#d98a7c" }}>{error}</p>}
-    <button className="hg-btn" style={userButtonStyle} disabled={saving}>{saving ? "Saving…" : "Save Assignments"}</button> <button type="button" className="hg-btn" style={userButtonStyle} onClick={onClose}>Cancel</button>
-  </form></div>;
 }
 function useRetailerDirectory(user, profile, enabled) {
   const scope = enabled ? `${user.uid}:${profile.role}` : "";
@@ -325,47 +278,6 @@ function useRetailerDirectory(user, profile, enabled) {
     return () => { live = false; stop(); };
   }, [scope, retry]);
   return { ...(state.scope === scope ? state : { records: [], ready: false, error: "" }), reload: () => setRetry((value) => value + 1) };
-}
-function RetailerEditor({ retailer, currentUid, canChangeStatus, canAssign, canEditTerritory, homeTerritory, territoryOptions, repDirectory, requirePermission, onClose, onSaved, onOpenExisting }) {
-  const [form, setForm] = useState(() => ({ ...Object.fromEntries(Object.keys(RETAILER_FIELDS).map((key) => [key, retailer?.[key] || (key === "country" ? "United States" : "")])), phone: formatRetailerPhone(retailer?.phone || "", retailer?.country || ""), active: retailer?.active ?? true }));
-  const [error, setError] = useState("");
-  const [duplicateId, setDuplicateId] = useState(null);
-  const [assignments, setAssignments] = useState([]);
-  const [territory, setTerritory] = useState(() => territoryDisplay(retailer?.territory));
-  const [saving, setSaving] = useState(false);
-  const mounted = useRef(true);
-  const busy = useRef(false);
-  useEffect(() => () => { mounted.current = false; }, []);
-  const submit = async (event) => {
-    event.preventDefault();
-    if (busy.current || !requirePermission("canUseRetailers")) return;
-    busy.current = true; setSaving(true); setError(""); setDuplicateId(null);
-    try {
-      const input = { ...form, ...(canEditTerritory ? { territory } : {}), ...(!retailer && canAssign ? { assignedRepUids: assignments } : {}) };
-      const id = await saveRetailerProfile(retailer?.id, input, currentUid, requirePermission);
-      if (mounted.current && auth.currentUser?.uid === currentUid && requirePermission("canUseRetailers")) onSaved(id);
-    } catch (failure) { if (mounted.current) { setError(failure.message); setDuplicateId(failure.retailerId || null); } }
-    finally { busy.current = false; if (mounted.current) setSaving(false); }
-  };
-  return <div role="dialog" aria-modal="true" aria-label={retailer ? "Edit Retailer" : "Add Retailer"} style={{ position: "fixed", inset: 0, zIndex: 65, background: "rgba(0,0,0,0.7)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
-    <form onSubmit={submit} className="hg-scroll" style={{ background: "#1c1f24", border: "1px solid #B8894C", borderRadius: 8, padding: 20, width: "100%", maxWidth: 640, maxHeight: "85vh", overflowY: "auto" }}>
-      <h2>{retailer ? "Edit Retailer" : "Add Retailer"}</h2>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
-        {Object.entries(RETAILER_FIELDS).map(([key, label]) => <label key={key}>{label}{key === "name" ? " *" : ""}
-          {key === "phone" ? <RetailerPhoneInput value={form.phone} country={form.country} disabled={saving} onChange={(phone) => setForm((previous) => ({ ...previous, phone }))} /> : key === "notes" ? <textarea aria-label={label} value={form[key]} maxLength={5000} disabled={saving} onChange={(e) => setForm({ ...form, [key]: e.target.value })} style={{ ...userFieldStyle, boxSizing: "border-box" }} /> : <input aria-label={label} autoComplete={RETAILER_AUTOCOMPLETE[key]} value={form[key]} required={key === "name"} maxLength={500} disabled={saving} onChange={(e) => setForm({ ...form, [key]: e.target.value })} style={{ ...userFieldStyle, boxSizing: "border-box" }} />}
-        </label>)}
-      </div>
-      {canEditTerritory ? <label style={{ display: "block", marginTop: 12 }}>Territory
-        <input aria-label="Retailer territory" autoComplete="off" list="retailer-territory-options" value={territory} maxLength={500} disabled={saving} onChange={(event) => setTerritory(event.target.value)} style={{ ...userFieldStyle, boxSizing: "border-box" }} placeholder="Unassigned Territory" />
-        <datalist id="retailer-territory-options">{territoryOptions.map((option) => <option key={option.value} value={option.label} />)}</datalist>
-      </label> : <p>Territory: {retailer ? retailerTerritoryLabel(retailer) : territoryDisplay(homeTerritory) || "Unassigned Territory"}{!retailer && " (from your current user profile)"}</p>}
-      {!retailer && canAssign && <RepAssignmentChoices value={assignments} onChange={setAssignments} repDirectory={repDirectory} disabled={saving} />}
-      {retailer && canChangeStatus && <label><input type="checkbox" checked={form.active} disabled={saving} onChange={(e) => setForm({ ...form, active: e.target.checked })} /> Active</label>}
-      {error && <p role="alert" style={{ color: "#d98a7c" }}>{error}</p>}
-      {duplicateId && <button type="button" className="hg-btn" style={userButtonStyle} onClick={() => onOpenExisting(duplicateId)}>Open Existing Retailer</button>}
-      <div style={{ display: "flex", gap: 10, marginTop: 16 }}><button className="hg-btn" style={userButtonStyle} disabled={saving}>{saving ? "Saving…" : "Save Retailer"}</button><button type="button" className="hg-btn" style={userButtonStyle} onClick={onClose}>Cancel</button></div>
-    </form>
-  </div>;
 }
 function RetailerDirectory({ directory, selectedId, onSelect, user, profile, permissions, draft, requirePermission, onStartOrder, onHistory, onClose }) {
   const [search, setSearch] = useState("");
