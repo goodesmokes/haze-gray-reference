@@ -2,6 +2,9 @@ const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs'),cp=require('node:child_process');
 const {loadClient}=require('./client-helpers.cjs');
+const {importNativeModule}=require('./test-support.cjs');
+let createRetailerService;
+test.before(async()=>{({createRetailerService}=await importNativeModule('js/services/retailer-service.mjs'));});
 const client=loadClient();
 const parser=require('@babel/parser'),traverse=require('@babel/traverse').default;
 const source=fs.readFileSync('index.html','utf8').match(/<script type="text\/babel"[^>]*>([\s\S]*?)<\/script>/)[1];
@@ -70,10 +73,10 @@ test('linked snapshots, legacy orders, exact-ID history and immutable historic d
 test('directory subscriptions fail closed across account, role changes and errors',()=>{
  let state,callback,fail,stopped=0,cleanup;
  const auth={currentUser:{uid:'owner'}};
- const env={auth,getProfilePermissions:client.getProfilePermissions,db:{},collection:()=>({}),query:()=>({}),where:()=>({}),
+ const subscriptionApi={collection:()=>({}),query:()=>({}),where:()=>({}),onSnapshot:(_source,next,error)=>{callback=next;fail=error;return ()=>stopped++;}};
+ const env={auth,getProfilePermissions:client.getProfilePermissions,subscribeRetailerDirectory:createRetailerService({db:{},auth,api:subscriptionApi}).subscribeRetailerDirectory,
  useState:initial=>[state===undefined?initial:state,value=>{state=value;}],
- useEffect:effect=>{cleanup=effect();},
- onSnapshot:(_source,next,error)=>{callback=next;fail=error;return ()=>stopped++;}};
+ useEffect:effect=>{cleanup=effect();}};
  const hook=Function(...Object.keys(env),'return '+text('useRetailerDirectory'))(...Object.values(env));
  hook({uid:'owner'},{role:'owner',active:true},true);
  callback({docs:[{id:'r1',data:()=>({name:'Private',nameNormalized:'private',active:true})}]});assert.equal(state.records.length,1);

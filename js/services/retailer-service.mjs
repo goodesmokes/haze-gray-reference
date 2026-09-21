@@ -1,11 +1,11 @@
-import { collection, doc, getDocs, query, runTransaction, serverTimestamp, where } from "firebase/firestore";
+import { collection, doc, getDocs, onSnapshot, query, runTransaction, serverTimestamp, where } from "firebase/firestore";
 import { getProfilePermissions } from "../domain/authorization.mjs";
 import { isAssignableRetailerUser, retailerAssignments, validateRepAssignments } from "../domain/assignments.mjs";
 import { findDuplicateRetailer, validateRetailer } from "../domain/retailers.mjs";
 import { retailerTerritoryFields, territoryDisplay } from "../domain/territories.mjs";
 import { auth, db } from "./firebase.mjs";
 
-const FIRESTORE_API = { collection, doc, getDocs, query, runTransaction, serverTimestamp, where };
+const FIRESTORE_API = { collection, doc, getDocs, onSnapshot, query, runTransaction, serverTimestamp, where };
 
 export function createRetailerService({ db: database, auth: authentication, api = FIRESTORE_API }) {
   const checkNewRepAssignments = async (transaction, next, previous) => {
@@ -74,7 +74,30 @@ export function createRetailerService({ db: database, auth: authentication, api 
     return ref.id;
   };
 
-  return { checkNewRepAssignments, saveRetailerAssignments, saveRetailerProfile };
+  const subscribeAssignmentProfiles = (onProfiles, onError) => api.onSnapshot(
+    api.collection(database, "users"),
+    (snapshot) => {
+      const profiles = snapshot.docs.map((item) => ({ ...item.data(), uid: item.id }));
+      profiles.sort((a, b) => String(a.displayName || a.uid).localeCompare(String(b.displayName || b.uid)));
+      onProfiles(profiles);
+    },
+    onError
+  );
+
+  const subscribeRetailerDirectory = (manager, onRecords, onError) => {
+    const source = manager
+      ? api.collection(database, "retailers")
+      : api.query(api.collection(database, "retailers"), api.where("active", "==", true));
+    return api.onSnapshot(source, (snapshot) => {
+      const records = snapshot.docs
+        .map((item) => ({ ...item.data(), id: item.id }))
+        .filter((item) => manager || item.active);
+      records.sort((a, b) => a.nameNormalized.localeCompare(b.nameNormalized));
+      onRecords(records);
+    }, onError);
+  };
+
+  return { checkNewRepAssignments, saveRetailerAssignments, saveRetailerProfile, subscribeAssignmentProfiles, subscribeRetailerDirectory };
 }
 
-export const { checkNewRepAssignments, saveRetailerAssignments, saveRetailerProfile } = createRetailerService({ db, auth });
+export const { checkNewRepAssignments, saveRetailerAssignments, saveRetailerProfile, subscribeAssignmentProfiles, subscribeRetailerDirectory } = createRetailerService({ db, auth });

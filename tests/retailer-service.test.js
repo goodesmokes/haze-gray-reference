@@ -12,6 +12,7 @@ const snapshot = (data) => ({ exists: () => data !== undefined, data: () => data
 function createFixture(documents = {}, options = {}) {
   const events = [];
   const writes = [];
+  const subscriptions = [];
   let generated = 0;
   let timestamp = 0;
   const api = {
@@ -23,6 +24,11 @@ function createFixture(documents = {}, options = {}) {
     },
     where: (...args) => ({ type: 'where', args }),
     query: (reference, ...constraints) => ({ reference, constraints }),
+    onSnapshot: (source, onData, onError) => {
+      const subscription = { source, onData, onError, stopped: false };
+      subscriptions.push(subscription);
+      return () => { subscription.stopped = true; };
+    },
     getDocs: async (scope) => {
       events.push(`query:${scope.reference.path}`);
       return { docs: (options.duplicates || []).map((item) => ({ id: item.id, data: () => item })) };
@@ -39,8 +45,71 @@ function createFixture(documents = {}, options = {}) {
       return run();
     }
   };
-  return { api, events, writes };
+  return { api, events, writes, subscriptions };
 }
+
+test('assignment profile subscription maps, sorts, forwards errors, and unsubscribes', async () => {
+  const { createRetailerService } = await importNativeModule('js/services/retailer-service.mjs');
+  const fixture = createFixture();
+  const service = createRetailerService({ db: {}, auth: {}, api: fixture.api });
+  const received = [];
+  const errors = [];
+  const unsubscribe = service.subscribeAssignmentProfiles((profiles) => received.push(profiles), (error) => errors.push(error));
+
+  assert.equal(fixture.subscriptions.length, 1);
+  assert.equal(fixture.subscriptions[0].source.path, 'users');
+  assert.equal(typeof unsubscribe, 'function');
+  fixture.subscriptions[0].onData({ docs: [
+    { id: 'z-user', data: () => ({ displayName: '', role: 'viewer', active: true }) },
+    { id: 'a-user', data: () => ({ displayName: 'Alpha', role: 'field_rep', active: true, territory: 'United States' }) }
+  ] });
+  assert.deepEqual(received[0], [
+    { displayName: 'Alpha', role: 'field_rep', active: true, territory: 'United States', uid: 'a-user' },
+    { displayName: '', role: 'viewer', active: true, uid: 'z-user' }
+  ]);
+  const error = new Error('listener failed');
+  fixture.subscriptions[0].onError(error);
+  assert.deepEqual(errors, [error]);
+  unsubscribe();
+  assert.equal(fixture.subscriptions[0].stopped, true);
+});
+
+test('retailer directory subscriptions preserve role query shape, mapping, sorting, and fields', async () => {
+  const { createRetailerService } = await importNativeModule('js/services/retailer-service.mjs');
+  const fixture = createFixture();
+  const service = createRetailerService({ db: {}, auth: {}, api: fixture.api });
+  const managerResults = [];
+  const repResults = [];
+  const errors = [];
+  const stopManager = service.subscribeRetailerDirectory(true, (records) => managerResults.push(records), (error) => errors.push(error));
+  const stopRep = service.subscribeRetailerDirectory(false, (records) => repResults.push(records), (error) => errors.push(error));
+
+  assert.deepEqual(fixture.subscriptions[0].source, { path: 'retailers' });
+  assert.deepEqual(fixture.subscriptions[1].source, {
+    reference: { path: 'retailers' },
+    constraints: [{ type: 'where', args: ['active', '==', true] }]
+  });
+
+  const directorySnapshot = { docs: [
+    { id: 'inactive', data: () => ({ name: 'Closed', nameNormalized: 'closed', active: false, territory: 'West', assignedRepUids: [] }) },
+    { id: 'other', data: () => ({ name: 'Beta', nameNormalized: 'beta', active: true, territory: 'United States', assignedRepUids: ['other-rep'] }) },
+    { id: 'unassigned', data: () => ({ name: 'Alpha', nameNormalized: 'alpha', active: true, territory: 'East', assignedRepUids: [] }) }
+  ] };
+  fixture.subscriptions[0].onData(directorySnapshot);
+  fixture.subscriptions[1].onData(directorySnapshot);
+
+  assert.deepEqual(managerResults[0].map(({ id }) => id), ['unassigned', 'other', 'inactive']);
+  assert.deepEqual(repResults[0].map(({ id }) => id), ['unassigned', 'other']);
+  assert.equal(repResults[0][1].territory, 'United States');
+  assert.deepEqual(repResults[0][1].assignedRepUids, ['other-rep']);
+
+  const error = new Error('directory failed');
+  fixture.subscriptions[1].onError(error);
+  assert.deepEqual(errors, [error]);
+  stopManager();
+  stopRep();
+  assert.equal(fixture.subscriptions.every(({ stopped }) => stopped), true);
+});
 
 test('assignment writes read the actor and retailer, preserve stale UIDs, and validate only additions', async () => {
   const { createRetailerService } = await importNativeModule('js/services/retailer-service.mjs');
@@ -163,12 +232,17 @@ test('duplicate detection remains advisory and outside the transaction', async (
   assert.equal(fixture.writes.length, 0);
 });
 
-test('index imports retailer write service without duplicate declarations', () => {
+test('index imports retailer service without duplicate declarations', () => {
   const source = extractInlineModule();
   const ast = parseModule(source);
   const serviceImport = ast.program.body.find((node) => node.type === 'ImportDeclaration' && node.source.value === './js/services/retailer-service.mjs');
   assert(serviceImport, 'retailer service import');
-  assert.deepEqual(serviceImport.specifiers.map((node) => node.imported.name), ['saveRetailerAssignments', 'saveRetailerProfile']);
+  assert.deepEqual(serviceImport.specifiers.map((node) => node.imported.name), [
+    'saveRetailerAssignments',
+    'saveRetailerProfile',
+    'subscribeAssignmentProfiles',
+    'subscribeRetailerDirectory'
+  ]);
   const localNodes = collectNamedNodes(source, (name) => ['checkNewRepAssignments', 'saveRetailerAssignments', 'saveRetailerProfile'].includes(name));
   assert.deepEqual([...localNodes.keys()], []);
 });

@@ -74,10 +74,10 @@ test('My/All/Assigned/Unassigned/rep filters preserve the shared dataset and sea
 test('profile listener never starts for Field Reps and clears across accounts, role loss and failures',()=>{
  let state,cleanup,callback,failure,subscriptions=0,stops=0;
  const auth={currentUser:{uid:'owner'}};
- const env={auth,db:{},collection:()=>({}),
+ const subscriptionApi={collection:()=>({}),onSnapshot:(_ref,next,error)=>{subscriptions++;callback=next;failure=error;return ()=>stops++;}};
+ const env={auth,subscribeAssignmentProfiles:createRetailerService({db:{},auth,api:subscriptionApi}).subscribeAssignmentProfiles,
  useState:initial=>typeof initial==='number'?[0,()=>{}]:[state===undefined?initial:state,value=>state=value],
- useEffect:effect=>{cleanup=effect();},
- onSnapshot:(_ref,next,error)=>{subscriptions++;callback=next;failure=error;return ()=>stops++;}};
+ useEffect:effect=>{cleanup=effect();}};
  const ui=loadClient(env);
  assert.deepEqual(ui.useAssignmentProfiles({uid:'owner'},false).profiles,[]);assert.equal(subscriptions,0);cleanup();
  ui.useAssignmentProfiles({uid:'owner'},true);callback({docs:[{id:'a',data:()=>({displayName:'Alice',role:'field_rep',active:true})}]});assert.equal(state.profiles.length,1);
