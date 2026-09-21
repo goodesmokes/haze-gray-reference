@@ -90,14 +90,19 @@ test('RetailerLocation preserves complete, partial and missing location renderin
   for (const retailer of [{}, { city: '', state: '' }, { city: '  ', state: '  ' }]) assert.equal(ui.RetailerLocation({ retailer }), null);
 });
 
-test('app imports shared UI modules without duplicate local declarations', () => {
+test('app and extracted directory import shared UI modules without duplicate local declarations', () => {
   const source = extractInlineModule();
   const ast = parseModule(source);
   const imports = ast.program.body.filter((node) => node.type === 'ImportDeclaration');
   const styleImport = imports.find((node) => node.source.value === './js/ui/styles.mjs');
   const componentImport = imports.find((node) => node.source.value === './js/components/common-ui.mjs');
   assert.deepEqual(styleImport.specifiers.map((node) => node.imported.name), ['userFieldStyle', 'userButtonStyle']);
-  assert.deepEqual(componentImport.specifiers.map((node) => node.imported.name), ['Gauge', 'Tag', 'RetailerLocation']);
+  assert.deepEqual(componentImport.specifiers.map((node) => node.imported.name), ['Gauge', 'Tag']);
+  const directorySource = readRepositoryFile('js/components/retailer-directory.mjs');
+  const directoryImports = parseModule(directorySource).program.body.filter((node) => node.type === 'ImportDeclaration');
+  const directoryCommonUi = directoryImports.find((node) => node.source.value === './common-ui.mjs');
+  assert.deepEqual(directoryCommonUi.specifiers.map((node) => node.imported.name), ['RetailerLocation']);
   const local = collectNamedNodes(source, (name) => ['userFieldStyle', 'userButtonStyle', 'getGaugePosition', 'Gauge', 'Tag', 'RetailerLocation'].includes(name));
   assert.deepEqual([...local.keys()], []);
+  assert.deepEqual([...collectNamedNodes(directorySource, (name) => name === 'RetailerLocation').keys()], []);
 });

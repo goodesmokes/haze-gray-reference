@@ -1,21 +1,21 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { loadClient } = require('./client-helpers.cjs');
-const { collectNamedNodes, parseModule, readApplicationModule, readRepositoryFile, traverse } = require('./test-support.cjs');
+const { collectNamedNodes, parseModule, readRepositoryFile, traverse } = require('./test-support.cjs');
 
-const appSource = readApplicationModule();
 const editorSource = readRepositoryFile('js/components/retailer-editors.mjs');
-const appAst = parseModule(appSource);
+const directorySource = readRepositoryFile('js/components/retailer-directory.mjs');
 const editorAst = parseModule(editorSource);
+const directoryAst = parseModule(directorySource);
 const editorNames = ['RetailerPhoneInput', 'RepAssignmentChoices', 'RetailerAssignmentEditor', 'RetailerEditor'];
-const appNodes = collectNamedNodes(appSource, (name) => name === 'RetailerDirectory');
+const directoryNodes = collectNamedNodes(directorySource, (name) => name === 'RetailerDirectory');
 const editorNodes = collectNamedNodes(editorSource, (name) => editorNames.includes(name));
 const client = loadClient();
 
 function componentSource(name) {
   const isDirectory = name === 'RetailerDirectory';
-  const source = isDirectory ? appSource : editorSource;
-  const node = (isDirectory ? appNodes : editorNodes).get(name);
+  const source = isDirectory ? directorySource : editorSource;
+  const node = (isDirectory ? directoryNodes : editorNodes).get(name);
   assert(node, `${name} must remain declared in its expected module`);
   return source.slice(node.start, node.end);
 }
@@ -131,17 +131,20 @@ test('RetailerDirectory preserves conditional unmount/remount identity boundarie
 
   assert.match(directory, /useEffect\(\(\) => \{ setEditor\(null\); setReplace\(false\); setEditingAssignments\(false\); \}, \[selectedId, selected\?\.active\]\)/);
   assert.match(directory, /const select = \(id\) => \{ if \(requirePermission\("canUseRetailers"\)\) \{ setEditor\(null\); onSelect\(id\); \} \}/);
-  assert.match(directory, /<RetailerEditor retailer=\{editor\.id \? editor : null\}[\s\S]*?onClose=\{\(\) => setEditor\(null\)\}/);
-  assert.match(directory, /<RetailerAssignmentEditor retailer=\{selected\}[\s\S]*?onClose=\{\(\) => setEditingAssignments\(false\)\}/);
-  assert.doesNotMatch(directory, /<Retailer(?:Assignment)?Editor key=/);
+  assert.match(directory, /h\(RetailerEditor, \{ retailer: editor\.id \? editor : null,[\s\S]*?onClose: \(\) => setEditor\(null\)/);
+  assert.match(directory, /h\(RetailerAssignmentEditor, \{ retailer: selected,[\s\S]*?onClose: \(\) => setEditingAssignments\(false\)/);
+  assert.doesNotMatch(directory, /h\(Retailer(?:Assignment)?Editor, \{ key:/);
 });
 
-test('app imports all editor exports and no duplicate local implementations remain', () => {
-  const editorImport = appAst.program.body.find((node) => node.type === 'ImportDeclaration' && node.source.value === './js/components/retailer-editors.mjs');
+test('directory imports editor components and no duplicate local implementations remain', () => {
+  const editorImport = directoryAst.program.body.find((node) => node.type === 'ImportDeclaration' && node.source.value === './retailer-editors.mjs');
   assert(editorImport, 'retailer editor import');
-  assert.deepEqual(editorImport.specifiers.map((node) => [node.imported.name, node.local.name]), editorNames.map((name) => [name, name]));
+  assert.deepEqual(editorImport.specifiers.map((node) => [node.imported.name, node.local.name]), [
+    ['RetailerAssignmentEditor', 'RetailerAssignmentEditor'],
+    ['RetailerEditor', 'RetailerEditor']
+  ]);
 
-  const localDeclarations = collectNamedNodes(appSource, (name) => editorNames.includes(name));
+  const localDeclarations = collectNamedNodes(directorySource, (name) => editorNames.includes(name));
   assert.deepEqual([...localDeclarations.keys()], []);
 
   const exported = [];

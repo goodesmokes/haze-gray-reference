@@ -13,7 +13,10 @@ traverse(ast,{FunctionDeclaration(p){nodes[p.node.id.name]=p.node;},VariableDecl
 const editorSource=readRepositoryFile('js/components/retailer-editors.mjs');
 const editorAst=parser.parse(editorSource,{sourceType:'module',plugins:['jsx']}),editorNodes={};
 traverse(editorAst,{FunctionDeclaration(p){editorNodes[p.node.id.name]=p.node;}});
-const text=name=>{const node=editorNodes[name]||nodes[name],value=editorNodes[name]?editorSource:source;return value.slice(node.start,node.end);};
+const directorySource=readRepositoryFile('js/components/retailer-directory.mjs');
+const directoryAst=parser.parse(directorySource,{sourceType:'module'}),directoryNodes={};
+traverse(directoryAst,{FunctionDeclaration(p){directoryNodes[p.node.id.name]=p.node;}});
+const text=name=>{const node=editorNodes[name]||directoryNodes[name]||nodes[name],value=editorNodes[name]?editorSource:directoryNodes[name]?directorySource:source;return value.slice(node.start,node.end);};
 const form={...Object.fromEntries(Object.keys(client.RETAILER_FIELDS).map(key=>[key,''])),name:'  Harbor Shop  ',active:true};
 test('directory cards render normalized location only when available',()=>{
  const ui=loadClient({React:{createElement:(tag,props,child)=>({tag,props,child})}});
@@ -22,7 +25,7 @@ test('directory cards render normalized location only when available',()=>{
  }
  for(const retailer of [{},{city:'',state:''},{city:'  ',state:'  '}])assert.equal(ui.RetailerLocation({retailer}),null);
  // Ensure the actual directory card uses this component, rather than testing an unused formatter.
- assert.match(text('RetailerDirectory'),/<RetailerLocation retailer=\{item\} \/>/);
+ assert.match(text('RetailerDirectory'),/h\(RetailerLocation, \{ retailer: item \}\)/);
 });
 test('directory search matches individual and combined location, name and contact',()=>{
  const retailer={name:'Harbor Shop',contactName:'Pat Smith',city:' Esteli ',state:' OK '};

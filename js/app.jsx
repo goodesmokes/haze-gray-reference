@@ -4,9 +4,7 @@ import { Plus, X, ChevronRight, ArrowLeft, Pencil, Trash2, Search, Cigarette, Up
 import { doc, collection, onSnapshot } from "firebase/firestore";
 import { parseMoney, getNumericPrice, getSinglePrice, computePackageMargins } from "./js/domain/pricing.mjs";
 import { ROLE_LABELS, NO_PERMISSIONS, ROLE_PERMISSIONS, isValidRole, isActiveProfile, getProfilePermissions } from "./js/domain/authorization.mjs";
-import { RETAILER_FIELDS, normalizeRetailerName, retailerLocation, normalizeRetailerSearch, retailerSearch, validRetailerId, formatRetailerPhone, validateRetailer, findDuplicateRetailer } from "./js/domain/retailers.mjs";
-import { retailerAssignments, isAssignableRetailerUser, validateRepAssignments, assignedRepLabel, assignmentSummary, filterRetailerAssignments } from "./js/domain/assignments.mjs";
-import { normalizeTerritory, retailerTerritoryLabel, retailerTerritoryFields, retailerTerritoryOptions, filterRetailerTerritories, territoryMismatches } from "./js/domain/territories.mjs";
+import { normalizeRetailerName, validRetailerId } from "./js/domain/retailers.mjs";
 import { nonnegativeMoney, isReadableSavedOrder, buildSavedOrder, buildReorderPlan, mergeReorderItems } from "./js/domain/saved-orders.mjs";
 import { newSizeRow, SEED_CIGARS, EMPTY_FORM, PACK_OPTIONS } from "./js/domain/catalog-data.mjs";
 import { db, auth } from "./js/services/firebase.mjs";
@@ -16,9 +14,9 @@ import { subscribeAssignmentProfiles, subscribeRetailerDirectory } from "./js/se
 import { saveAuthorizationProfile as saveAuthorizationProfileService } from "./js/services/profile-service.mjs";
 import { signInWithEmail, signOutUser, subscribeAuthState } from "./js/services/auth-service.mjs";
 import { userFieldStyle, userButtonStyle } from "./js/ui/styles.mjs";
-import { Gauge, Tag, RetailerLocation } from "./js/components/common-ui.mjs";
+import { Gauge, Tag } from "./js/components/common-ui.mjs";
 import { AuthorizationProfileEditor, AuthorizedUsers } from "./js/components/authorization-ui.mjs";
-import { RetailerPhoneInput, RepAssignmentChoices, RetailerAssignmentEditor, RetailerEditor } from "./js/components/retailer-editors.mjs";
+import { RetailerDirectory } from "./js/components/retailer-directory.mjs";
 
 // Application authorization only. Firestore Security Rules remain the enforcement boundary.
 
@@ -279,73 +277,6 @@ function useRetailerDirectory(user, profile, enabled) {
   }, [scope, retry]);
   return { ...(state.scope === scope ? state : { records: [], ready: false, error: "" }), reload: () => setRetry((value) => value + 1) };
 }
-function RetailerDirectory({ directory, selectedId, onSelect, user, profile, permissions, draft, requirePermission, onStartOrder, onHistory, onClose }) {
-  const [search, setSearch] = useState("");
-  const [assignmentFilter, setAssignmentFilter] = useState("");
-  const [territoryFilter, setTerritoryFilter] = useState("all");
-  const [editingAssignments, setEditingAssignments] = useState(false);
-  const repDirectory = useAssignmentProfiles(user, permissions.canAssignRetailers);
-  const [editor, setEditor] = useState(null);
-  const [replace, setReplace] = useState(false);
-  const selected = directory.records.find((item) => item.id === selectedId);
-  useEffect(() => { setEditor(null); setReplace(false); setEditingAssignments(false); }, [selectedId, selected?.active]);
-  const select = (id) => { if (requirePermission("canUseRetailers")) { setEditor(null); onSelect(id); } };
-  const start = () => {
-    if (!requirePermission("canUseRetailers") || !selected?.active) return;
-    if (hasMeaningfulDraft(draft)) setReplace(true); else onStartOrder(selected.id);
-  };
-  const hasMine = directory.records.some((item) => retailerAssignments(item).includes(user.uid));
-  const activeFilter = assignmentFilter || (permissions.canFilterOwnRetailers && !permissions.canAssignRetailers && hasMine ? "mine" : "all");
-  const showMyRetailersEmptyState = activeFilter === "mine" && !hasMine;
-  const territoryOptions = retailerTerritoryOptions(directory.records, permissions.canEditRetailerTerritory ? repDirectory.profiles : [], profile);
-  const mismatches = territoryMismatches(selected, repDirectory.profiles, permissions.canEditRetailerTerritory);
-  const results = filterRetailerTerritories(filterRetailerAssignments(directory.records, activeFilter, user.uid), territoryFilter, profile?.territory).filter((item) => retailerSearch(item, search));
-  return <div style={{ maxWidth: 1000, margin: "0 auto", padding: 24 }}>
-    <button className="hg-btn" style={userButtonStyle} onClick={selectedId ? () => select(null) : onClose}><ArrowLeft size={14} /> {selectedId ? "Back to Retailers" : "Back to list"}</button>
-    <h1 style={{ fontFamily: "'Bebas Neue', sans-serif" }}>Retailers</h1>
-    {directory.error && <p role="alert">{directory.error} <button className="hg-btn" style={userButtonStyle} onClick={directory.reload}>Reload Retailers</button></p>}
-    {permissions.canAssignRetailers && repDirectory.error && <p role="alert">{repDirectory.error} Assignments are preserved. <button className="hg-btn" style={userButtonStyle} onClick={repDirectory.reload}>Retry</button></p>}
-    {!directory.ready ? <p>Loading retailers…</p> : selectedId ? selected ? <>
-      <h2>{selected.name}</h2><p>{selected.active ? "Active" : "Inactive — unavailable for new orders"}</p>
-      {Object.entries(RETAILER_FIELDS).filter(([key]) => key !== "name").map(([key, label]) => selected[key] && <p key={key} style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}><strong>{label}:</strong> {key === "phone" ? formatRetailerPhone(selected.phone, selected.country) : selected[key]}</p>)}
-      <section style={{ overflowWrap: "anywhere" }}><h3>Territory</h3><p>{retailerTerritoryLabel(selected)}</p>
-        {permissions.canEditRetailerTerritory && <button className="hg-btn" style={userButtonStyle} onClick={() => { if (requirePermission("canEditRetailerTerritory")) setEditor(selected); }}>Edit Territory</button>}
-      </section>
-      <section style={{ overflowWrap: "anywhere" }}><h3>Assigned Users</h3><p>{assignmentSummary(selected, user.uid, permissions.canAssignRetailers, repDirectory.profiles)}</p>
-        {permissions.canAssignRetailers && <button className="hg-btn" style={userButtonStyle} onClick={() => { if (requirePermission("canAssignRetailers")) setEditingAssignments(true); }}>Edit Assigned Users</button>}
-      </section>
-      {permissions.canEditRetailerTerritory && mismatches.length > 0 && <div style={{ color: "#8A93A0", fontSize: 13, overflowWrap: "anywhere" }}>{mismatches.map((item) => <p key={item.uid}>{item.name} — Home territory: {item.territory} · Retailer: {retailerTerritoryLabel(selected)} · Cross-territory assignment (coverage is allowed)</p>)}</div>}
-      <p>Created by {selected.creatorDisplayName || "Not recorded"} · {savedOrderDate(selected.createdAt)}</p>
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-        <button className="hg-btn" style={userButtonStyle} onClick={() => { if (requirePermission("canUseRetailers")) setEditor(selected); }}>Edit Retailer</button>
-        <button className="hg-btn" style={userButtonStyle} disabled={!selected.active} onClick={start}>Start New Order</button>
-        <button className="hg-btn" style={userButtonStyle} onClick={() => { if (requirePermission("canUseRetailers")) onHistory(selected.id); }}>View Linked Orders</button>
-      </div><p style={{ color: "#8A93A0" }}>Linked history uses exact retailer IDs. Older free-text orders remain available through Order History search.</p>
-    </> : <p>This retailer is inactive, no longer exists, or is not available to your account.</p> : <>
-      <button className="hg-btn" style={userButtonStyle} onClick={() => { if (requirePermission("canUseRetailers")) setEditor({}); }}>+ Add Retailer</button>
-      <div style={{ marginTop: 16 }}><label>Assignment filter <select aria-label="Assignment filter" style={userFieldStyle} value={activeFilter} onChange={(event) => { setAssignmentFilter(event.target.value); if (!permissions.canEditRetailerTerritory) setTerritoryFilter("all"); }}>
-        <option value="all">{permissions.canAssignRetailers ? "All Retailers" : "All Active Retailers"}</option>
-        {permissions.canFilterOwnRetailers && <option value="mine">My Retailers</option>}
-        {permissions.canAssignRetailers && <><option value="assigned">Assigned</option><option value="unassigned">Unassigned</option>{repDirectory.profiles.filter((profile) => isAssignableRetailerUser(profile) || directory.records.some((item) => retailerAssignments(item).includes(profile.uid))).map((profile) => <option key={profile.uid} value={"rep:" + profile.uid}>{assignedRepLabel(profile.uid, user.uid, true, repDirectory.profiles)}</option>)}</>}
-      </select></label></div>
-      {showMyRetailersEmptyState && <p>No retailers are currently assigned to you. <button className="hg-btn" style={userButtonStyle} onClick={() => setAssignmentFilter("all")}>{permissions.canAssignRetailers ? "All Retailers" : "All Active Retailers"}</button></p>}
-      <div style={{ marginTop: 12 }}><label>Territory filter <select aria-label="Territory filter" style={userFieldStyle} value={territoryFilter} onChange={(event) => { setTerritoryFilter(event.target.value); if (!permissions.canEditRetailerTerritory) setAssignmentFilter("all"); }}>
-        <option value="all">All Territories</option><option value="mine" disabled={!normalizeTerritory(profile?.territory)}>My Territory</option><option value="other">Other Territories</option><option value="unassigned">Unassigned Territory</option>
-        {territoryOptions.map((option) => <option key={option.value} value={"territory:" + option.value}>{option.label}</option>)}
-      </select></label><p style={{ color: "#8A93A0", fontSize: 13 }}>{permissions.canEditRetailerTerritory ? "Assignment and territory filters work together." : "My Retailers uses assignments; My Territory uses your current profile territory."} <button className="hg-btn" style={userButtonStyle} onClick={() => { setAssignmentFilter("all"); setTerritoryFilter("all"); setSearch(""); }}>{permissions.canAssignRetailers ? "Show All Retailers" : "Show All Active Retailers"}</button></p></div>
-      {!normalizeTerritory(profile?.territory) && <p>No territory is currently assigned to your user profile.</p>}
-      <input aria-label="Search retailers" placeholder="Search name, contact, city, state or territory…" style={{ ...userFieldStyle, boxSizing: "border-box", margin: "16px 0" }} value={search} onChange={(e) => setSearch(e.target.value)} />
-      {!directory.records.length ? <p>No retailers yet.</p> : !results.length ? <p>No retailers match your search.</p> : results.map((item) => <button key={item.id} className="hg-btn" style={{ ...userButtonStyle, display: "block", width: "100%", textAlign: "left", padding: 16, marginBottom: 10 }} onClick={() => select(item.id)}>
-        <strong>{item.name}</strong>{permissions.canChangeRetailerStatus && <span> · {item.active ? "Active" : "Inactive"}</span>}
-        <RetailerLocation retailer={item} /><div style={{ whiteSpace: "normal", overflowWrap: "anywhere" }}>Territory: {retailerTerritoryLabel(item)}</div><div>{[item.contactName, item.email, formatRetailerPhone(item.phone, item.country)].filter(Boolean).join(" · ")}</div><div style={{ whiteSpace: "normal", overflowWrap: "anywhere", marginTop: 6 }}>{assignmentSummary(item, user.uid, permissions.canAssignRetailers, repDirectory.profiles, true)}</div>
-      </button>)}
-    </>}
-    {editor && (!editor.id || (selected && (selected.active || permissions.canChangeRetailerStatus))) && <RetailerEditor retailer={editor.id ? editor : null} currentUid={user.uid} canChangeStatus={permissions.canChangeRetailerStatus} canAssign={permissions.canAssignRetailers} canEditTerritory={permissions.canEditRetailerTerritory} homeTerritory={profile?.territory} territoryOptions={territoryOptions} repDirectory={repDirectory} requirePermission={requirePermission} onClose={() => setEditor(null)} onSaved={select} onOpenExisting={select} />}
-    {editingAssignments && selected && permissions.canAssignRetailers && <RetailerAssignmentEditor retailer={selected} user={user} repDirectory={repDirectory} requirePermission={requirePermission} onClose={() => setEditingAssignments(false)} />}
-    {replace && selected?.active && <div role="dialog" aria-modal="true" aria-label="Replace current order" style={{ position: "fixed", inset: 0, zIndex: 65, background: "rgba(0,0,0,0.7)", display: "grid", placeItems: "center", padding: 16 }}><div style={{ background: "#1c1f24", border: "1px solid #B8894C", borderRadius: 8, padding: 24 }}><h2>Start New Order for {selected.name}?</h2><p>Your current active draft will be replaced. Saved orders remain unchanged.</p><button className="hg-btn" style={userButtonStyle} onClick={() => { if (requirePermission("canUseRetailers")) onStartOrder(selected.id, true); }}>Replace Current Order</button> <button className="hg-btn" style={userButtonStyle} onClick={() => setReplace(false)}>Cancel</button></div></div>}
-  </div>;
-}
-
 function DetailOrderControls({ cigar, packOptions, orderItems, onAdd, onViewOrder }) {
   const [expanded, setExpanded] = useState(false);
   const [sizeKey, setSizeKey] = useState("");
@@ -729,6 +660,7 @@ const openOrderFromCompare = (cigarId) => {
   const permissions = isAuthorizedUser ? getProfilePermissions(userProfile) : NO_PERMISSIONS;
   const { canEditCatalog, canEditPackages, canUseOrderBuilder, canUseFinalReview, canManageUsers, canMigrateLegacyData } = permissions;
   const directory = useRetailerDirectory(user, userProfile, permissions.canUseRetailers);
+  const repDirectory = useAssignmentProfiles(user, showRetailers && permissions.canAssignRetailers);
   const activeDraft = { orderItems, orderRetailer, orderEmail, orderNotes, retailerId };
   const clearProtectedDraft = () => {
     draftOwnerRef.current = null;
@@ -1222,7 +1154,7 @@ const openOrderFromCompare = (cigarId) => {
       )}
 
       {showRetailers && permissions.canUseRetailers ? (
-        <RetailerDirectory key={`${user.uid}:${userProfile.role}`} directory={directory} selectedId={selectedRetailerId} onSelect={setSelectedRetailerId} user={user} profile={userProfile} permissions={permissions} draft={activeDraft} requirePermission={requirePermission} onStartOrder={startRetailerOrder} onHistory={openOrderHistory} onClose={() => setShowRetailers(false)} />
+        <RetailerDirectory key={`${user.uid}:${userProfile.role}`} directory={directory} repDirectory={repDirectory} selectedId={selectedRetailerId} onSelect={setSelectedRetailerId} user={user} profile={userProfile} permissions={permissions} draft={activeDraft} requirePermission={requirePermission} onStartOrder={startRetailerOrder} onHistory={openOrderHistory} onClose={() => setShowRetailers(false)} hasMeaningfulDraft={hasMeaningfulDraft} savedOrderDate={savedOrderDate} />
       ) : showOrderHistory && canUseOrderBuilder ? (
         <OrderHistory retailerFilter={historyRetailerId} onOpenRetailer={openRetailer} key={`${user.uid}:${userProfile.role}:${historyRetailerId || "all"}`} user={user} profile={userProfile} cigars={cigars} packOptions={PACK_OPTIONS} draft={activeDraft} requirePermission={requirePermission} onApplyReorder={applyReorder} onClose={() => { setShowOrderHistory(false); setShowCompare(false); setSelectedId(null); }} />
       ) : showAuthorizedUsers && canManageUsers ? (

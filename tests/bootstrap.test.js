@@ -20,7 +20,7 @@ test('index.html remains the application entry point with its React root and mou
   assert(imports.some((node) => node.source.value === 'react-dom/client'));
   assert(imports.some((node) => node.source.value === './js/domain/pricing.mjs'));
   assert(imports.some((node) => node.source.value === './js/domain/authorization.mjs'));
-  for (const module of ['./js/domain/retailers.mjs', './js/domain/assignments.mjs', './js/domain/territories.mjs']) assert(imports.some((node) => node.source.value === module), module);
+  assert(imports.some((node) => node.source.value === './js/domain/retailers.mjs'));
   assert(imports.some((node) => node.source.value === './js/domain/saved-orders.mjs'));
   assert(imports.some((node) => node.source.value === './js/domain/catalog-data.mjs'));
   assert(imports.some((node) => node.source.value === './js/services/firebase.mjs'));
@@ -32,7 +32,7 @@ test('index.html remains the application entry point with its React root and mou
   assert(imports.some((node) => node.source.value === './js/ui/styles.mjs'));
   assert(imports.some((node) => node.source.value === './js/components/common-ui.mjs'));
   assert(imports.some((node) => node.source.value === './js/components/authorization-ui.mjs'));
-  assert(imports.some((node) => node.source.value === './js/components/retailer-editors.mjs'));
+  assert(imports.some((node) => node.source.value === './js/components/retailer-directory.mjs'));
 
   let rootLookup = false, appMount = false;
   traverse(ast, {

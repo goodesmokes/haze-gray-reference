@@ -1,29 +1,34 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { loadClient } = require('./client-helpers.cjs');
-const { collectNamedNodes, parseModule, readApplicationModule, traverse } = require('./test-support.cjs');
+const { collectNamedNodes, parseModule, readApplicationModule, readRepositoryFile, traverse } = require('./test-support.cjs');
 
-const source = readApplicationModule();
-const ast = parseModule(source);
-const names = ['HazeGrayReference', 'RetailerDirectory', 'useRetailerDirectory', 'useAssignmentProfiles'];
-const nodes = collectNamedNodes(source, (name) => names.includes(name));
+const appSource = readApplicationModule();
+const directorySource = readRepositoryFile('js/components/retailer-directory.mjs');
+const appAst = parseModule(appSource);
+const directoryAst = parseModule(directorySource);
+const appNames = ['HazeGrayReference', 'useRetailerDirectory', 'useAssignmentProfiles'];
+const appNodes = collectNamedNodes(appSource, (name) => appNames.includes(name));
+const directoryNodes = collectNamedNodes(directorySource, (name) => name === 'RetailerDirectory');
 const client = loadClient();
 
 function declarationSource(name) {
-  const node = nodes.get(name);
-  assert(node, `${name} must remain declared in js/app.jsx`);
+  const isDirectory = name === 'RetailerDirectory';
+  const source = isDirectory ? directorySource : appSource;
+  const node = (isDirectory ? directoryNodes : appNodes).get(name);
+  assert(node, `${name} must remain declared in its expected module`);
   return source.slice(node.start, node.end);
 }
 
 function variableExpression(componentName, variableName) {
   let expression;
-  traverse(ast, {
+  traverse(directoryAst, {
     VariableDeclarator(path) {
       if (path.node.id?.name === variableName && path.getFunctionParent()?.node.id?.name === componentName) expression = path.node.init;
     }
   });
   assert(expression, `${componentName}.${variableName}`);
-  return source.slice(expression.start, expression.end);
+  return directorySource.slice(expression.start, expression.end);
 }
 
 test('RetailerDirectory remains account-and-role keyed with fresh local UI state defaults', () => {
@@ -31,6 +36,8 @@ test('RetailerDirectory remains account-and-role keyed with fresh local UI state
   const directory = declarationSource('RetailerDirectory');
 
   assert.match(root, /<RetailerDirectory key=\{`\$\{user\.uid\}:\$\{userProfile\.role\}`\}/);
+  assert.match(root, /const repDirectory = useAssignmentProfiles\(user, showRetailers && permissions\.canAssignRetailers\)/);
+  assert.match(root, /<RetailerDirectory key=\{`\$\{user\.uid\}:\$\{userProfile\.role\}`\} directory=\{directory\} repDirectory=\{repDirectory\}/);
   for (const expected of [
     'const [search, setSearch] = useState("")',
     'const [assignmentFilter, setAssignmentFilter] = useState("")',
@@ -47,9 +54,9 @@ test('selection, direct target changes and active-status changes clear all trans
   assert.match(directory, /const selected = directory\.records\.find\(\(item\) => item\.id === selectedId\)/);
   assert.match(directory, /useEffect\(\(\) => \{ setEditor\(null\); setReplace\(false\); setEditingAssignments\(false\); \}, \[selectedId, selected\?\.active\]\)/);
   assert.match(directory, /const select = \(id\) => \{ if \(requirePermission\("canUseRetailers"\)\) \{ setEditor\(null\); onSelect\(id\); \} \}/);
-  assert.match(directory, /onClose=\{\(\) => setEditor\(null\)\}/);
-  assert.match(directory, /onClose=\{\(\) => setEditingAssignments\(false\)\}/);
-  assert.match(directory, /onClick=\{\(\) => setReplace\(false\)\}>Cancel<\/button>/);
+  assert.match(directory, /onClose: \(\) => setEditor\(null\)/);
+  assert.match(directory, /onClose: \(\) => setEditingAssignments\(false\)/);
+  assert.match(directory, /onClick: \(\) => setReplace\(false\) \}, "Cancel"/);
 });
 
 test('directory and assignment hooks preserve retry counters, scope resets and cleanup', () => {
@@ -63,8 +70,8 @@ test('directory and assignment hooks preserve retry counters, scope resets and c
     assert.match(hook, /reload: \(\) => setRetry\(\(value\) => value \+ 1\)/);
     assert.match(hook, /return \(\) => \{ live = false; stop\(\); \}/);
   }
-  assert.match(directory, /directory\.error && <p role="alert">[\s\S]*?onClick=\{directory\.reload\}>Reload Retailers<\/button>/);
-  assert.match(directory, /repDirectory\.error && <p role="alert">[\s\S]*?onClick=\{repDirectory\.reload\}>Retry<\/button>/);
+  assert.match(directory, /directory\.error && h\("p", \{ role: "alert" \}, directory\.error,[\s\S]*?onClick: directory\.reload \}, "Reload Retailers"\)/);
+  assert.match(directory, /repDirectory\.error && h\("p", \{ role: "alert" \}, repDirectory\.error,[\s\S]*?onClick: repDirectory\.reload \}, "Retry"\)/);
 });
 
 test('assignment, territory and search filters preserve all existing combinations and empty states', () => {
@@ -99,10 +106,10 @@ test('role visibility and privacy gates remain fail-closed and manager mismatch 
 
   assert.match(directoryHook, /const manager = getProfilePermissions\(profile\)\.canChangeRetailerStatus/);
   assert.match(directoryHook, /subscribeRetailerDirectory\(manager,/);
-  assert.match(directory, /useAssignmentProfiles\(user, permissions\.canAssignRetailers\)/);
+  assert.match(appSource, /useAssignmentProfiles\(user, showRetailers && permissions\.canAssignRetailers\)/);
   assert.match(directory, /permissions\.canAssignRetailers && repDirectory\.error/);
   assert.match(directory, /permissions\.canEditRetailerTerritory && mismatches\.length > 0/);
-  assert.match(directory, /permissions\.canChangeRetailerStatus && <span> · \{item\.active \? "Active" : "Inactive"\}<\/span>/);
+  assert.match(directory, /permissions\.canChangeRetailerStatus && h\("span", null, " · ", item\.active \? "Active" : "Inactive"\)/);
   assert.match(directory, /editor && \(!editor\.id \|\| \(selected && \(selected\.active \|\| permissions\.canChangeRetailerStatus\)\)\)/);
   assert.match(directory, /editingAssignments && selected && permissions\.canAssignRetailers/);
 
@@ -115,17 +122,29 @@ test('role visibility and privacy gates remain fail-closed and manager mismatch 
 test('RetailerDirectory preserves selection, order, history, edit, assignment and back callbacks', () => {
   const directory = declarationSource('RetailerDirectory');
 
-  assert.match(directory, /onClick=\{selectedId \? \(\) => select\(null\) : onClose\}/);
-  assert.match(directory, /onClick=\{\(\) => select\(item\.id\)\}/);
+  assert.match(directory, /onClick: selectedId \? \(\) => select\(null\) : onClose/);
+  assert.match(directory, /onClick: \(\) => select\(item\.id\)/);
   assert.match(directory, /if \(hasMeaningfulDraft\(draft\)\) setReplace\(true\); else onStartOrder\(selected\.id\)/);
   assert.match(directory, /onStartOrder\(selected\.id, true\)/);
   assert.match(directory, /onHistory\(selected\.id\)/);
   assert.match(directory, /setEditor\(selected\)/);
   assert.match(directory, /setEditor\(\{\}\)/);
   assert.match(directory, /setEditingAssignments\(true\)/);
-  assert.match(directory, /onSaved=\{select\} onOpenExisting=\{select\}/);
+  assert.match(directory, /onSaved: select, onOpenExisting: select/);
 });
 
-test('RetailerDirectory and its hooks remain local during Phase 7E-Prep', () => {
-  for (const name of ['RetailerDirectory', 'useRetailerDirectory', 'useAssignmentProfiles']) assert(nodes.has(name), name);
+test('app imports the directory export without a duplicate while subscription hooks remain local', () => {
+  const directoryImport = appAst.program.body.find((node) => node.type === 'ImportDeclaration' && node.source.value === './js/components/retailer-directory.mjs');
+  assert(directoryImport, 'retailer directory import');
+  assert.deepEqual(directoryImport.specifiers.map((node) => [node.imported.name, node.local.name]), [['RetailerDirectory', 'RetailerDirectory']]);
+  assert.deepEqual([...collectNamedNodes(appSource, (name) => name === 'RetailerDirectory').keys()], []);
+  for (const name of ['useRetailerDirectory', 'useAssignmentProfiles']) assert(appNodes.has(name), name);
+  const exported = [];
+  traverse(directoryAst, {
+    ExportNamedDeclaration(path) {
+      const name = path.node.declaration?.id?.name;
+      if (name) exported.push(name);
+    }
+  });
+  assert.deepEqual(exported, ['RetailerDirectory']);
 });

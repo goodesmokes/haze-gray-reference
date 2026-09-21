@@ -2,15 +2,18 @@ const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const {loadClient}=require('./client-helpers.cjs');
-const {importNativeModule,readApplicationModule}=require('./test-support.cjs');
+const {importNativeModule,readApplicationModule,readRepositoryFile}=require('./test-support.cjs');
 let createRetailerService;
 test.before(async()=>{({createRetailerService}=await importNativeModule('js/services/retailer-service.mjs'));});
 const client=loadClient();
 const source=readApplicationModule();
+const directorySource=readRepositoryFile('js/components/retailer-directory.mjs');
 const parser=require('@babel/parser'),traverse=require('@babel/traverse').default;
 const ast=parser.parse(source,{sourceType:'module',plugins:['jsx']});
-const nodes={};traverse(ast,{FunctionDeclaration(p){nodes[p.node.id.name]=p.node;},VariableDeclarator(p){if(p.getFunctionParent()?.node.id?.name==='RetailerDirectory')nodes[p.node.id.name]=p.node.init;}});
-const text=name=>source.slice(nodes[name].start,nodes[name].end);
+const directoryAst=parser.parse(directorySource,{sourceType:'module'});
+const nodes={};traverse(ast,{FunctionDeclaration(p){nodes[p.node.id.name]=p.node;}});
+const directoryNodes={};traverse(directoryAst,{FunctionDeclaration(p){directoryNodes[p.node.id.name]=p.node;},VariableDeclarator(p){if(p.getFunctionParent()?.node.id?.name==='RetailerDirectory')directoryNodes[p.node.id.name]=p.node.init;}});
+const text=name=>{const node=directoryNodes[name]||nodes[name],value=directoryNodes[name]?directorySource:source;return value.slice(node.start,node.end);};
 
 test('assignment lists support legacy, shared ownership, removals and bounded UID strings',()=>{
  assert.deepEqual(client.retailerAssignments({}),[]);
@@ -59,9 +62,9 @@ test('My/All/Assigned/Unassigned/rep filters preserve the shared dataset and sea
   const records=[{id:'mine',assignedRepUids:[role]},{id:'other',assignedRepUids:['another']}];
   assert.deepEqual(client.filterRetailerAssignments(records,'mine',role).map(r=>r.id),['mine']);
  }
- assert.match(text('RetailerDirectory'),/permissions.canFilterOwnRetailers && <option value="mine">/);
- assert.match(text('RetailerDirectory'),/permissions.canAssignRetailers && <>/);
- assert.match(text('RetailerDirectory'),/\{showMyRetailersEmptyState && <p>No retailers are currently assigned to you\./);
+ assert.match(text('RetailerDirectory'),/permissions\.canFilterOwnRetailers && h\("option", \{ value: "mine" \}, "My Retailers"\)/);
+ assert.match(text('RetailerDirectory'),/permissions\.canAssignRetailers && h\(React\.Fragment/);
+ assert.match(text('RetailerDirectory'),/showMyRetailersEmptyState && h\("p", null, "No retailers are currently assigned to you\./);
  assert.match(text('RetailerDirectory'),/No retailers are currently assigned to you/);
  for(const role of ['owner','admin'])assert(client.getProfilePermissions({role,active:true}).canAssignRetailers);
  assert(client.getProfilePermissions({role:'field_rep',active:true}).canFilterOwnRetailers);
@@ -88,7 +91,7 @@ test('profile listener never starts for Field Reps and clears across accounts, r
  failure(new Error('permission denied'));assert.deepEqual(state.profiles,[]);assert.match(state.error,/Could not load assignment profiles/);
  cleanup();auth.currentUser={uid:'rep'};assert.deepEqual(ui.useAssignmentProfiles({uid:'rep'},false).profiles,[]);assert.equal(subscriptions,2);
  cleanup();auth.currentUser=null;assert.deepEqual(ui.useAssignmentProfiles(null,false).profiles,[]);assert.equal(stops,2);
- assert.match(text('RetailerDirectory'),/useAssignmentProfiles\(user, permissions.canAssignRetailers\)/);
+ assert.match(text('HazeGrayReference'),/useAssignmentProfiles\(user, showRetailers && permissions.canAssignRetailers\)/);
  assert.match(text('RetailerDirectory'),/editingAssignments && selected && permissions.canAssignRetailers/);
 });
 
