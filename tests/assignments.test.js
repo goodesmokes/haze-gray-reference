@@ -2,6 +2,9 @@ const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const {loadClient}=require('./client-helpers.cjs');
+const {importNativeModule}=require('./test-support.cjs');
+let createRetailerService;
+test.before(async()=>{({createRetailerService}=await importNativeModule('js/services/retailer-service.mjs'));});
 const client=loadClient();
 const source=fs.readFileSync('index.html','utf8').match(/<script type="text\/babel"[^>]*>([\s\S]*?)<\/script>/)[1];
 const parser=require('@babel/parser'),traverse=require('@babel/traverse').default;
@@ -94,7 +97,7 @@ test('save handler requires manager role, checks newly assigned active reps and 
  const profiles={a:{role:'field_rep',active:true},b:{role:'field_rep',active:true},stale:{role:'viewer',active:true},inactive:{role:'field_rep',active:false}};
  const auth={currentUser:{uid:'manager'}};
  const transaction={get:async ref=>{reads.push(ref);const data=ref==='users/manager'?{role,active}:ref==='retailers/r'?{assignedRepUids:current,name:'Keep business fields'}:profiles[ref.slice(6)];return {exists:()=>!!data,data:()=>data};},update:(ref,data)=>writes.push({ref,data})};
- const ui=loadClient({auth,db:{},doc:(_db,col,id)=>col+'/'+id,runTransaction:async(_db,fn)=>fn(transaction),serverTimestamp:()=> 'server-time'});
+ const ui=createRetailerService({db:{},auth,api:{doc:(_db,col,id)=>col+'/'+id,runTransaction:async(_db,fn)=>fn(transaction),serverTimestamp:()=> 'server-time'}});
  for(const managerRole of ['owner','admin']){
   role=managerRole;writes=[];reads=[];await ui.saveRetailerAssignments('r',['stale','a','b'],['stale'],'manager',()=>true);
   assert.equal(writes.length,1);assert.deepEqual(writes[0].data,{assignedRepUids:['stale','a','b'],updatedAt:'server-time'});assert(!reads.includes('users/stale'));

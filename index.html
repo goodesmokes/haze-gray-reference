@@ -29,7 +29,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { createRoot } from "react-dom/client";
 import { Plus, X, ChevronRight, ArrowLeft, Pencil, Trash2, Search, Cigarette, Upload, Loader2, Scale, Mail, Copy, ShoppingCart, Minus } from "lucide-react";
-import { doc, getDoc, updateDoc, collection, onSnapshot, getDocs, query, where, runTransaction, serverTimestamp } from "firebase/firestore";
+import { doc, getDoc, updateDoc, collection, onSnapshot, query, where } from "firebase/firestore";
 import { onAuthStateChanged, signInWithEmailAndPassword, signOut } from "firebase/auth";
 import { parseMoney, getNumericPrice, getSinglePrice, computePackageMargins } from "./js/domain/pricing.mjs";
 import { ROLE_LABELS, NO_PERMISSIONS, ROLE_PERMISSIONS, isValidRole, isActiveProfile, getProfilePermissions, getAssignableRoles, canManageAuthorizationProfile, authorizationUpdateError } from "./js/domain/authorization.mjs";
@@ -41,6 +41,7 @@ import { newSizeRow, SEED_CIGARS, EMPTY_FORM, PACK_OPTIONS } from "./js/domain/c
 import { db, auth } from "./js/services/firebase.mjs";
 import { subscribeCatalog, isLegacyCatalogMigrationAvailable, saveCatalogRecord, deleteCatalogRecord, readLegacyCatalog } from "./js/services/catalog-service.mjs";
 import { savePendingOrder, subscribeOrderHistory } from "./js/services/order-service.mjs";
+import { saveRetailerAssignments, saveRetailerProfile } from "./js/services/retailer-service.mjs";
 
 // Application authorization only. Firestore Security Rules remain the enforcement boundary.
 const userFieldStyle = { width: "100%", background: "#14161A", border: "1px solid #454b53", borderRadius: 4, padding: "8px 10px", color: "#EDE6D6", fontSize: 14 };
@@ -481,29 +482,6 @@ function useAssignmentProfiles(user, enabled) {
   }, [scope, retry]);
   return { ...(scope && state.scope === scope ? state : { profiles: [], ready: false, error: "" }), reload: () => setRetry((value) => value + 1) };
 }
-async function checkNewRepAssignments(transaction, next, previous) {
-  validateRepAssignments(next);
-  for (const uid of next.filter((id) => !previous.includes(id))) {
-    const profile = await transaction.get(doc(db, "users", uid));
-    if (!profile.exists() || !isAssignableRetailerUser(profile.data())) throw new Error("A selected user is no longer an active Owner, Admin, or Field Rep. Reopen assignment controls and try again.");
-  }
-}
-async function saveRetailerAssignments(id, next, expected, uid, requirePermission) {
-  const permitted = () => auth.currentUser?.uid === uid && requirePermission("canAssignRetailers");
-  if (!permitted()) throw new Error("You are not authorized to change retailer assignments.");
-  validateRepAssignments(next);
-  await runTransaction(db, async (transaction) => {
-    const profile = await transaction.get(doc(db, "users", uid));
-    if (!permitted() || !getProfilePermissions(profile.exists() ? profile.data() : null).canAssignRetailers) throw new Error("You are not authorized to change retailer assignments.");
-    const ref = doc(db, "retailers", id), snapshot = await transaction.get(ref);
-    if (!snapshot.exists()) throw new Error("This retailer no longer exists.");
-    const previous = retailerAssignments(snapshot.data());
-    if (JSON.stringify(previous) !== JSON.stringify(expected)) throw new Error("Assignments changed while you were editing. Close and reopen to review the latest assignments.");
-    await checkNewRepAssignments(transaction, next, previous);
-    if (!permitted()) throw new Error("Your retailer assignment access changed.");
-    transaction.update(ref, { assignedRepUids: next, updatedAt: serverTimestamp() });
-  });
-}
 function RepAssignmentChoices({ value, onChange, repDirectory, disabled }) {
   const choices = repDirectory.profiles.filter((profile) => isAssignableRetailerUser(profile) || value.includes(profile.uid));
   const missing = value.filter((uid) => !choices.some((profile) => profile.uid === uid));
@@ -538,46 +516,6 @@ function RetailerAssignmentEditor({ retailer, user, repDirectory, requirePermiss
     {error && <p role="alert" style={{ color: "#d98a7c" }}>{error}</p>}
     <button className="hg-btn" style={userButtonStyle} disabled={saving}>{saving ? "Saving…" : "Save Assignments"}</button> <button type="button" className="hg-btn" style={userButtonStyle} onClick={onClose}>Cancel</button>
   </form></div>;
-}
-async function saveRetailerProfile(id, input, uid, requirePermission) {
-  const permitted = () => auth.currentUser?.uid === uid && requirePermission("canUseRetailers");
-  if (!permitted()) throw new Error("You are not authorized to manage retailers.");
-  const data = validateRetailer(input);
-  if (id && Object.prototype.hasOwnProperty.call(input, "assignedRepUids")) throw new Error("Use Assigned Users to change retailer assignments.");
-  if (!id) {
-    // Advisory duplicate check, not a global uniqueness guarantee across simultaneous clients.
-    const existing = await getDocs(query(collection(db, "retailers"), where("active", "==", true)));
-    if (!permitted()) throw new Error("Your retailer access changed.");
-    const duplicate = findDuplicateRetailer(existing.docs.map((item) => ({ ...item.data(), id: item.id })), data.name);
-    if (duplicate) { const error = new Error("An active retailer with this name already exists."); error.retailerId = duplicate.id; throw error; }
-  }
-  const ref = id ? doc(db, "retailers", id) : doc(collection(db, "retailers"));
-  await runTransaction(db, async (transaction) => {
-    const profile = await transaction.get(doc(db, "users", uid));
-    const permissions = getProfilePermissions(profile.exists() ? profile.data() : null);
-    if (!permitted() || !permissions.canUseRetailers) throw new Error("Your retailer access changed.");
-    const hasTerritoryInput = Object.prototype.hasOwnProperty.call(input, "territory") || Object.prototype.hasOwnProperty.call(input, "territoryNormalized");
-    if (id && hasTerritoryInput && !permissions.canEditRetailerTerritory) throw new Error("You are not authorized to change retailer territory.");
-    if (id) {
-      const previous = await transaction.get(ref);
-      if (!previous.exists()) throw new Error("This retailer no longer exists.");
-      if (!permissions.canChangeRetailerStatus && (!previous.data().active || data.active !== previous.data().active)) throw new Error("You cannot change retailer status or edit an inactive retailer.");
-      if (!permitted()) throw new Error("Your retailer access changed.");
-      const territoryFields = permissions.canEditRetailerTerritory && hasTerritoryInput ? retailerTerritoryFields(input.territory ?? "") : {};
-      transaction.update(ref, { ...data, ...territoryFields, updatedAt: serverTimestamp() });
-    } else {
-      if (!data.active) throw new Error("New retailers must be active.");
-      const homeTerritory = territoryDisplay(profile.data().territory);
-      if (!permissions.canEditRetailerTerritory && hasTerritoryInput && (input.territory !== homeTerritory || Object.prototype.hasOwnProperty.call(input, "territoryNormalized"))) throw new Error("New retailer territory must match your current user profile.");
-      const territoryFields = retailerTerritoryFields(permissions.canEditRetailerTerritory ? (input.territory ?? "") : homeTerritory);
-      const assignments = input.assignedRepUids === undefined ? [] : validateRepAssignments(input.assignedRepUids);
-      if (!permissions.canAssignRetailers && Object.prototype.hasOwnProperty.call(input, "assignedRepUids")) throw new Error("You are not authorized to choose retailer assignments.");
-      if (permissions.canAssignRetailers) await checkNewRepAssignments(transaction, assignments, []);
-      if (!permitted()) throw new Error("Your retailer access changed.");
-      transaction.set(ref, { ...data, ...territoryFields, assignedRepUids: assignments, schemaVersion: 1, creatorUid: uid, creatorDisplayName: profile.data().displayName, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
-    }
-  });
-  return ref.id;
 }
 function useRetailerDirectory(user, profile, enabled) {
   const scope = enabled ? `${user.uid}:${profile.role}` : "";

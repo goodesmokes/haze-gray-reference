@@ -8,6 +8,7 @@ const enabled = process.env.FIRESTORE_EMULATOR_HOST === '127.0.0.1:8085' && proc
 
 test('Spark browser SDK and Auth/Firestore rules', { skip: !enabled, timeout: 120000 }, async (t) => {
   const { createOrderService } = await importNativeModule('js/services/order-service.mjs');
+  const { createRetailerService } = await importNativeModule('js/services/retailer-service.mjs');
   const { initializeApp, deleteApp } = require('firebase/app');
   const authSdk = require('firebase/auth'), sdk = require('firebase/firestore');
   const project = 'demo-haze-gray-orders', base = `http://127.0.0.1:8085/v1/projects/${project}/databases/(default)/documents`;
@@ -28,6 +29,7 @@ test('Spark browser SDK and Auth/Firestore rules', { skip: !enabled, timeout: 12
       if (!['signedout','missing'].includes(role)) await seed('/users/'+uid,profile);
       const client = loadClient({...sdk,auth,db});
       client.savePendingOrder = createOrderService({ db, auth, api: sdk }).savePendingOrder;
+      Object.assign(client, createRetailerService({ db, auth, api: sdk }));
       actors.push({role,app,auth,db,uid,profile,client});
     }
     const actor = (role) => actors.find(a=>a.role===role), owner=actor('owner'), admin=actor('admin'), rep=actor('field_rep');
