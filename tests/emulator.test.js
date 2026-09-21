@@ -3,9 +3,11 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { loadClient } = require('./client-helpers.cjs');
+const { importNativeModule } = require('./test-support.cjs');
 const enabled = process.env.FIRESTORE_EMULATOR_HOST === '127.0.0.1:8085' && process.env.FIREBASE_AUTH_EMULATOR_HOST === '127.0.0.1:9099' && process.env.GCLOUD_PROJECT === 'demo-haze-gray-orders';
 
 test('Spark browser SDK and Auth/Firestore rules', { skip: !enabled, timeout: 120000 }, async (t) => {
+  const { createOrderService } = await importNativeModule('js/services/order-service.mjs');
   const { initializeApp, deleteApp } = require('firebase/app');
   const authSdk = require('firebase/auth'), sdk = require('firebase/firestore');
   const project = 'demo-haze-gray-orders', base = `http://127.0.0.1:8085/v1/projects/${project}/databases/(default)/documents`;
@@ -24,7 +26,9 @@ test('Spark browser SDK and Auth/Firestore rules', { skip: !enabled, timeout: 12
       if (role !== 'signedout') uid = (await authSdk.createUserWithEmailAndPassword(auth,`${role}-${Date.now()}@example.test`,'test-password-only')).user.uid;
       const profile = {displayName:role,email:role+'@example.test',territory:'Test',role:role==='inactive'?'field_rep':role,active:role!=='inactive'};
       if (!['signedout','missing'].includes(role)) await seed('/users/'+uid,profile);
-      actors.push({role,app,auth,db,uid,profile,client:loadClient({...sdk,auth,db})});
+      const client = loadClient({...sdk,auth,db});
+      client.savePendingOrder = createOrderService({ db, auth, api: sdk }).savePendingOrder;
+      actors.push({role,app,auth,db,uid,profile,client});
     }
     const actor = (role) => actors.find(a=>a.role===role), owner=actor('owner'), admin=actor('admin'), rep=actor('field_rep');
     const allowed=[owner,admin,rep];

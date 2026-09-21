@@ -20,6 +20,7 @@ test('index.html remains the application entry point with its React root and mou
   assert(imports.some((node) => node.source.value === './js/domain/catalog-data.mjs'));
   assert(imports.some((node) => node.source.value === './js/services/firebase.mjs'));
   assert(imports.some((node) => node.source.value === './js/services/catalog-service.mjs'));
+  assert(imports.some((node) => node.source.value === './js/services/order-service.mjs'));
 
   let rootLookup = false, appMount = false;
   traverse(ast, {
