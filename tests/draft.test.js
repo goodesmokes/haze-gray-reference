@@ -6,7 +6,7 @@ const {loadClient}=require('./client-helpers.cjs');
 const source=fs.readFileSync('index.html','utf8').match(/<script type="text\/babel"[^>]*>([\s\S]*?)<\/script>/)[1];
 const ast=parser.parse(source,{sourceType:'module',plugins:['jsx']});
 const nodes={};let authEffect,persistEffect;
-traverse(ast,{FunctionDeclaration(p){nodes[p.node.id.name]=p.node;},VariableDeclarator(p){nodes[p.node.id.name]=p.node.init;},CallExpression(p){if(p.node.callee.name==='useEffect'){const body=source.slice(p.node.arguments[0].start,p.node.arguments[0].end);if(body.includes('onAuthStateChanged'))authEffect=body;if(body.includes('Never persist'))persistEffect=body;}}});
+traverse(ast,{FunctionDeclaration(p){nodes[p.node.id.name]=p.node;},VariableDeclarator(p){nodes[p.node.id.name]=p.node.init;},CallExpression(p){if(p.node.callee.name==='useEffect'){const body=source.slice(p.node.arguments[0].start,p.node.arguments[0].end);if(body.includes('subscribeAuthState'))authEffect=body;if(body.includes('Never persist'))persistEffect=body;}}});
 const text=name=>source.slice(nodes[name].start,nodes[name].end);
 test('UID-scoped draft lifecycle isolates accounts, authorization, transitions and legacy storage',()=>{
  const storage=new Map([['haze-gray-cigars.order-draft.v1',JSON.stringify({orderRetailer:'Unowned legacy'})]]);
@@ -15,7 +15,7 @@ test('UID-scoped draft lifecycle isolates accounts, authorization, transitions a
  draftOwnerRef:{current:null},accessRef:{current:{}},NO_PERMISSIONS:{canUseOrderBuilder:false}};
  for(const name of ['RetailerId','ShowRetailers','SelectedRetailerId','HistoryRetailerId','DraftUid','OrderItems','OrderRetailer','OrderEmail','OrderNotes','ShowOrderBuilder','ShowFinalReview','ShowOrderHistory','CompareOrderId','CopyConfirmed','FormOpen','ConfirmDeleteId','ShowAuthorizedUsers','UserProfile','ProfileReady','ProfileError','User','AuthReady'])env['set'+name]=value=>state[name]=value;
  let authCallback,profileCallback;
- env.onAuthStateChanged=(_auth,cb)=>{authCallback=cb;return ()=>{};};
+ env.subscribeAuthState=cb=>{authCallback=cb;return ()=>{};};
  env.onSnapshot=(_doc,cb)=>{profileCallback=cb;return ()=>{};};
  env.getProfilePermissions=p=>({canUseOrderBuilder:!!p?.active&&['owner','admin','field_rep'].includes(p.role)});
  const compile=body=>Function(...Object.keys(env),'return '+body)(...Object.values(env));
