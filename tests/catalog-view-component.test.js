@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { collectNamedNodes, importNativeModule, parseModule, readApplicationModule, traverse } = require('./test-support.cjs');
+const { collectNamedNodes, importNativeModule, parseModule, readApplicationModule, readRepositoryFile, traverse } = require('./test-support.cjs');
 
 const source = readApplicationModule();
 const ast = parseModule(source);
@@ -8,6 +8,9 @@ const nodes = collectNamedNodes(source, (name) => ['HazeGrayReference', 'DetailO
 const rootNode = nodes.get('HazeGrayReference');
 const root = source.slice(rootNode.start, rootNode.end);
 const detailControls = source.slice(nodes.get('DetailOrderControls').start, nodes.get('DetailOrderControls').end);
+const comparisonSource = readRepositoryFile('js/components/comparison-view.mjs');
+const comparisonNodes = collectNamedNodes(comparisonSource, (name) => name === 'ComparisonView');
+const comparison = comparisonSource.slice(comparisonNodes.get('ComparisonView').start, comparisonNodes.get('ComparisonView').end);
 const rootVariables = new Map();
 traverse(ast, {
   VariableDeclarator(path) {
@@ -73,19 +76,30 @@ test('catalog compare mode preserves click routing, three-item limit and compare
 
 test('comparison preserves ID order, fallback values, pricing economics and callbacks', async () => {
   assert.match(root, /showCompare && compareIds\.length >= 2/);
-  assert.match(root, /\{compareIds\.map\(\(id\) => \{\s*const c = cigars\.find\(\(x\) => x\.id === id\)/);
-  assert.match(root, /onClick=\{\(\) => setShowCompare\(false\)\}/);
-  assert.match(root, /onClick=\{\(\) => openOrderFromCompare\(c\.id\)\}/);
-  for (const fallback of ['c.wrapper || "—"', 'c.binder || "—"', 'c.filler || "—"', 'c.origin || "—"', 'if (!prices.length) return "—"', 'if (!allMargins.length) return "—"']) assert(root.includes(fallback), fallback);
-  assert.match(root, /b\.marginPct > a\.marginPct \? b : a/);
-  assert.match(root, /b\.grossProfit > a\.grossProfit \? b : a/);
-  assert.match(root, /row\.label\.includes\("Margin"\)[\s\S]*?row\.label\.includes\("Profit"\)[\s\S]*?"#E7C79A"/);
+  assert.match(root, /<ComparisonView compareIds=\{compareIds\} cigars=\{cigars\}[\s\S]*?onClose=\{\(\) => setShowCompare\(false\)\} onBuildOrder=\{openOrderFromCompare\}/);
+  assert.match(comparison, /compareIds\.map\(\(id\) => \{\s*const c = cigars\.find\(\(x\) => x\.id === id\)/);
+  assert.match(comparison, /onClick: onClose/);
+  assert.match(comparison, /onClick: \(\) => onBuildOrder\(c\.id\)/);
+  for (const fallback of ['c.wrapper || "—"', 'c.binder || "—"', 'c.filler || "—"', 'c.origin || "—"', 'if (!prices.length) return "—"', 'if (!allMargins.length) return "—"']) assert(comparison.includes(fallback), fallback);
+  assert.match(comparison, /b\.marginPct > a\.marginPct \? b : a/);
+  assert.match(comparison, /b\.grossProfit > a\.grossProfit \? b : a/);
+  assert.match(comparison, /row\.label\.includes\("Margin"\) \|\| row\.label\.includes\("Profit"\) \? "#E7C79A"/);
   const pricing = await importNativeModule('js/domain/pricing.mjs');
   const margins = pricing.computePackageMargins({ msrp: '$10', keystoneBox10: '$60', keystoneBox20: '$110' });
   assert.deepEqual(margins.map(({ key, grossProfit, marginPct }) => [key, grossProfit, Number(marginPct.toFixed(1))]), [
     ['box10', 40, 40],
     ['box20', 90, 45]
   ]);
+});
+
+test('app imports the extracted comparison without retaining a duplicate implementation', () => {
+  const imports = ast.program.body.filter((node) => node.type === 'ImportDeclaration');
+  const comparisonImport = imports.find((node) => node.source.value === './js/components/comparison-view.mjs');
+  assert.deepEqual(comparisonImport.specifiers.map((node) => node.imported.name), ['ComparisonView']);
+  assert.deepEqual([...collectNamedNodes(source, (name) => name === 'ComparisonView').keys()], []);
+  assert.deepEqual([...comparisonNodes.keys()], ['ComparisonView']);
+  assert.match(comparisonSource, /export function ComparisonView/);
+  assert.doesNotMatch(root, /Sales Comparison|Best Retail Margin|Best Box \/ Bundle Profit/);
 });
 
 test('cigar detail preserves identity, fallbacks, display wiring and permission gates', () => {
