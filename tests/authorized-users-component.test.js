@@ -1,15 +1,19 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { collectNamedNodes, parseModule, readApplicationModule, traverse } = require('./test-support.cjs');
+const { collectNamedNodes, parseModule, readApplicationModule, readRepositoryFile, traverse } = require('./test-support.cjs');
 
-const source = readApplicationModule();
-const components = collectNamedNodes(source, (name) =>
-  ['AuthorizationProfileEditor', 'AuthorizedUsers', 'HazeGrayReference'].includes(name)
+const appSource = readApplicationModule();
+const authorizationUiSource = readRepositoryFile('js/components/authorization-ui.mjs');
+const appComponents = collectNamedNodes(appSource, (name) => name === 'HazeGrayReference');
+const authorizationComponents = collectNamedNodes(authorizationUiSource, (name) =>
+  ['AuthorizationProfileEditor', 'AuthorizedUsers'].includes(name)
 );
 
 function componentSource(name) {
-  const node = components.get(name);
-  assert(node, `${name} must remain declared in js/app.jsx`);
+  const isRoot = name === 'HazeGrayReference';
+  const source = isRoot ? appSource : authorizationUiSource;
+  const node = (isRoot ? appComponents : authorizationComponents).get(name);
+  assert(node, `${name} must remain declared in its expected module`);
   return source.slice(node.start, node.end);
 }
 
@@ -26,7 +30,7 @@ test('Authorization Profile Editor remains target-keyed with target-derived and 
   const authorizedUsersSource = componentSource('AuthorizedUsers');
   const editorSource = componentSource('AuthorizationProfileEditor');
 
-  assert.match(authorizedUsersSource, /<AuthorizationProfileEditor key=\{editingProfile\.uid\}/);
+  assert.match(authorizedUsersSource, /h\(AuthorizationProfileEditor, \{ key: editingProfile\.uid,/);
   assert.match(editorSource, /const \[role, setRole\] = useState\(profile\.role \|\| ""\)/);
   assert.match(editorSource, /const \[territory, setTerritory\] = useState\(profile\.territory \|\| ""\)/);
   assert.match(editorSource, /const \[active, setActive\] = useState\(profile\.active === true\)/);
@@ -65,21 +69,38 @@ test('Authorized Users preserves Owner/Admin target gates and protected self con
   const editorSource = componentSource('AuthorizationProfileEditor');
 
   assert.match(authorizedUsersSource, /!requirePermission\("canManageUsers"\) \|\| !canManageAuthorizationProfile\(managerProfile, profile\) \|\|\s*\(profile\.role === "owner" && !requirePermission\("canManageOwners"\)\)/);
-  assert.match(authorizedUsersSource, /canManageAuthorizationProfile\(managerProfile, profile\) && <button[\s\S]*?>Edit<\/button>/);
-  assert.match(authorizedUsersSource, /canManageAuthorizationProfile\(managerProfile, editingProfile\) && <AuthorizationProfileEditor/);
+  assert.match(authorizedUsersSource, /canManageAuthorizationProfile\(managerProfile, profile\) && h\("button",[\s\S]*?"Edit"\)/);
+  assert.match(authorizedUsersSource, /canManageAuthorizationProfile\(managerProfile, editingProfile\) && h\(AuthorizationProfileEditor/);
   assert.match(editorSource, /const isSelf = profile\.uid === currentUid/);
-  assert.match(editorSource, /aria-label="Authorization role"[\s\S]*?disabled=\{saving \|\| isSelf\}/);
-  assert.match(editorSource, /aria-label="Authorization status"[\s\S]*?disabled=\{saving \|\| isSelf\}/);
+  assert.match(editorSource, /"aria-label": "Authorization role"[\s\S]*?disabled: saving \|\| isSelf/);
+  assert.match(editorSource, /"aria-label": "Authorization status"[\s\S]*?disabled: saving \|\| isSelf/);
   assert.match(editorSource, /You cannot change your own role or disable your own profile\./);
   assert.match(editorSource, /authorizationUpdateError\(managerProfile, currentUid, profile\.uid, profile, \{ role, active \}\)/);
 });
 
-test('Authorized Users components have not been extracted during test preparation', () => {
-  const declarations = [];
-  traverse(parseModule(source), {
+test('app imports both exports and no duplicate local implementations remain', () => {
+  const appAst = parseModule(appSource);
+  const serviceImport = appAst.program.body.find((node) => node.type === 'ImportDeclaration' && node.source.value === './js/components/authorization-ui.mjs');
+  assert(serviceImport, 'authorization UI import');
+  assert.deepEqual(serviceImport.specifiers.map((node) => [node.imported.name, node.local.name]), [
+    ['AuthorizationProfileEditor', 'AuthorizationProfileEditor'],
+    ['AuthorizedUsers', 'AuthorizedUsers']
+  ]);
+
+  const localDeclarations = [];
+  traverse(appAst, {
     FunctionDeclaration(path) {
-      if (['AuthorizationProfileEditor', 'AuthorizedUsers'].includes(path.node.id?.name)) declarations.push(path.node.id.name);
+      if (['AuthorizationProfileEditor', 'AuthorizedUsers'].includes(path.node.id?.name)) localDeclarations.push(path.node.id.name);
     }
   });
-  assert.deepEqual(declarations, ['AuthorizationProfileEditor', 'AuthorizedUsers']);
+  assert.deepEqual(localDeclarations, []);
+
+  const exported = [];
+  traverse(parseModule(authorizationUiSource), {
+    ExportNamedDeclaration(path) {
+      const name = path.node.declaration?.id?.name;
+      if (name) exported.push(name);
+    }
+  });
+  assert.deepEqual(exported, ['AuthorizationProfileEditor', 'AuthorizedUsers']);
 });

@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { collectNamedNodes, extractInlineModule, importNativeModule, parseModule } = require('./test-support.cjs');
+const { collectNamedNodes, extractInlineModule, importNativeModule, parseModule, readRepositoryFile } = require('./test-support.cjs');
 
 const profileSnapshot = (data) => ({ exists: () => data !== undefined, data: () => data });
 
@@ -156,19 +156,23 @@ test('deleted targets are not recreated and access changes while getDoc is pendi
   }
 });
 
-test('index imports the profile service and retains Authorized Users lifecycle guards', () => {
+test('app and authorization UI import the profile service and retain Authorized Users lifecycle guards', () => {
   const source = extractInlineModule();
   const ast = parseModule(source);
   const serviceImport = ast.program.body.find((node) => node.type === 'ImportDeclaration' && node.source.value === './js/services/profile-service.mjs');
   assert(serviceImport, 'profile service import');
   assert.deepEqual(serviceImport.specifiers.map((node) => [node.imported.name, node.local.name]), [
-    ['saveAuthorizationProfile', 'saveAuthorizationProfileService'],
-    ['subscribeAuthorizedUsers', 'subscribeAuthorizedUsers']
+    ['saveAuthorizationProfile', 'saveAuthorizationProfileService']
   ]);
   const localNodes = collectNamedNodes(source, (name) => ['readAuthorizationProfile', 'updateAuthorizationProfile', 'subscribeAuthorizedUsers'].includes(name));
   assert.deepEqual([...localNodes.keys()], []);
-  const authorizedUsers = collectNamedNodes(source, (name) => name === 'AuthorizedUsers').get('AuthorizedUsers');
-  const componentSource = source.slice(authorizedUsers.start, authorizedUsers.end);
+  const uiSource = readRepositoryFile('js/components/authorization-ui.mjs');
+  const uiAst = parseModule(uiSource);
+  const uiServiceImport = uiAst.program.body.find((node) => node.type === 'ImportDeclaration' && node.source.value === '../services/profile-service.mjs');
+  assert(uiServiceImport, 'authorization UI profile service import');
+  assert.deepEqual(uiServiceImport.specifiers.map((node) => node.imported.name), ['subscribeAuthorizedUsers']);
+  const authorizedUsers = collectNamedNodes(uiSource, (name) => name === 'AuthorizedUsers').get('AuthorizedUsers');
+  const componentSource = uiSource.slice(authorizedUsers.start, authorizedUsers.end);
   assert.match(componentSource, /let listening = true/);
   assert.match(componentSource, /if \(!listening\) return/);
   assert.match(componentSource, /listening = false; unsubscribe\(\)/);

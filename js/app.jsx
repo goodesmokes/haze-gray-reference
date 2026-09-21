@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import { Plus, X, ChevronRight, ArrowLeft, Pencil, Trash2, Search, Cigarette, Upload, Loader2, Scale, Mail, Copy, ShoppingCart, Minus } from "lucide-react";
 import { doc, collection, onSnapshot } from "firebase/firestore";
 import { parseMoney, getNumericPrice, getSinglePrice, computePackageMargins } from "./js/domain/pricing.mjs";
-import { ROLE_LABELS, NO_PERMISSIONS, ROLE_PERMISSIONS, isValidRole, isActiveProfile, getProfilePermissions, getAssignableRoles, canManageAuthorizationProfile, authorizationUpdateError } from "./js/domain/authorization.mjs";
+import { ROLE_LABELS, NO_PERMISSIONS, ROLE_PERMISSIONS, isValidRole, isActiveProfile, getProfilePermissions } from "./js/domain/authorization.mjs";
 import { RETAILER_FIELDS, RETAILER_AUTOCOMPLETE, normalizeRetailerName, retailerLocation, normalizeRetailerSearch, retailerSearch, validRetailerId, formatRetailerPhone, validateRetailer, findDuplicateRetailer } from "./js/domain/retailers.mjs";
 import { retailerAssignments, isAssignableRetailerUser, validateRepAssignments, assignedRepLabel, assignmentSummary, filterRetailerAssignments } from "./js/domain/assignments.mjs";
 import { territoryDisplay, normalizeTerritory, retailerTerritoryLabel, retailerTerritoryFields, retailerTerritoryOptions, filterRetailerTerritories, territoryMismatches } from "./js/domain/territories.mjs";
@@ -13,137 +13,13 @@ import { db, auth } from "./js/services/firebase.mjs";
 import { subscribeCatalog, isLegacyCatalogMigrationAvailable, saveCatalogRecord, deleteCatalogRecord, readLegacyCatalog } from "./js/services/catalog-service.mjs";
 import { savePendingOrder, subscribeOrderHistory } from "./js/services/order-service.mjs";
 import { saveRetailerAssignments, saveRetailerProfile, subscribeAssignmentProfiles, subscribeRetailerDirectory } from "./js/services/retailer-service.mjs";
-import { saveAuthorizationProfile as saveAuthorizationProfileService, subscribeAuthorizedUsers } from "./js/services/profile-service.mjs";
+import { saveAuthorizationProfile as saveAuthorizationProfileService } from "./js/services/profile-service.mjs";
 import { signInWithEmail, signOutUser, subscribeAuthState } from "./js/services/auth-service.mjs";
 import { userFieldStyle, userButtonStyle } from "./js/ui/styles.mjs";
 import { Gauge, Tag, RetailerLocation } from "./js/components/common-ui.mjs";
+import { AuthorizationProfileEditor, AuthorizedUsers } from "./js/components/authorization-ui.mjs";
 
 // Application authorization only. Firestore Security Rules remain the enforcement boundary.
-
-function AuthorizationProfileEditor({ profile, currentUid, managerProfile, onSave, onClose }) {
-  const [role, setRole] = useState(profile.role || "");
-  const [territory, setTerritory] = useState(profile.territory || "");
-  const [active, setActive] = useState(profile.active === true);
-  const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState("");
-  const mounted = useRef(true);
-  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
-  useEffect(() => {
-    setRole(profile.role || "");
-    setTerritory(profile.territory || "");
-    setActive(profile.active === true);
-  }, [profile.role, profile.territory, profile.active]);
-  const isSelf = profile.uid === currentUid;
-  const save = async () => {
-    setSaving(true);
-    setSaveError("");
-    try {
-      const authorizationError = authorizationUpdateError(managerProfile, currentUid, profile.uid, profile, { role, active });
-      if (authorizationError) throw new Error(authorizationError);
-      await onSave(profile.uid, { role, territory, active });
-      if (mounted.current) onClose();
-    } catch (e) {
-      if (mounted.current) setSaveError(e.message);
-    } finally {
-      if (mounted.current) setSaving(false);
-    }
-  };
-  return (
-    <div style={{ marginTop: 20, border: "1px solid #B8894C", borderRadius: 8, padding: 20 }}>
-      <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 24, marginBottom: 8 }}>Edit Authorization Profile</div>
-      <div style={{ color: "#C9CFD6", marginBottom: 16 }}>{profile.displayName || profile.email || profile.uid}</div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 14 }}>
-        <label style={{ fontFamily: "'Oswald', sans-serif", color: "#8A93A0" }}>Role
-          <select aria-label="Authorization role" value={getAssignableRoles(managerProfile).includes(role) ? role : ""} disabled={saving || isSelf} onChange={(e) => setRole(e.target.value)} style={userFieldStyle}>
-            {!getAssignableRoles(managerProfile).includes(role) && <option value="">Select an allowed role</option>}
-            {getAssignableRoles(managerProfile).map((value) => <option key={value} value={value}>{ROLE_LABELS[value]}</option>)}
-          </select>
-        </label>
-        <label style={{ fontFamily: "'Oswald', sans-serif", color: "#8A93A0" }}>Territory
-          <input value={territory} disabled={saving} onChange={(e) => setTerritory(e.target.value)} style={userFieldStyle} />
-        </label>
-        <label style={{ fontFamily: "'Oswald', sans-serif", color: "#8A93A0" }}>Status
-          <select aria-label="Authorization status" value={active ? "active" : "disabled"} disabled={saving || isSelf} onChange={(e) => setActive(e.target.value === "active")} style={userFieldStyle}>
-            <option value="active">Active</option><option value="disabled">Disabled</option>
-          </select>
-        </label>
-      </div>
-      {isSelf && <div style={{ color: "#8A93A0", fontSize: 12, marginTop: 12 }}>You cannot change your own role or disable your own profile.</div>}
-      {saveError && <div role="alert" style={{ color: "#d98a7c", marginTop: 12 }}>{saveError}</div>}
-      <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
-        <button className="hg-btn" disabled={saving || !isValidRole(role)} onClick={save} style={{ ...userButtonStyle, background: "#B8894C", color: "#14161A" }}>{saving ? "Saving…" : "Save Profile"}</button>
-        <button className="hg-btn" disabled={saving} onClick={onClose} style={userButtonStyle}>Cancel</button>
-      </div>
-    </div>
-  );
-}
-
-function AuthorizedUsers({ currentUid, managerProfile, requirePermission, onSave, onClose }) {
-  const [profiles, setProfiles] = useState([]);
-  const [ready, setReady] = useState(false);
-  const [usersError, setUsersError] = useState("");
-  const [editingUid, setEditingUid] = useState(null);
-  useEffect(() => {
-    if (!requirePermission("canManageUsers")) return;
-    let listening = true;
-    const unsubscribe = subscribeAuthorizedUsers((profiles) => {
-      if (!listening) return;
-      setProfiles(profiles);
-      setUsersError("");
-      setReady(true);
-    }, (e) => {
-      if (!listening) return;
-      setProfiles([]);
-      setEditingUid(null);
-      setUsersError("Could not load authorization profiles. (" + e.message + ")");
-      setReady(true);
-    });
-    return () => { listening = false; unsubscribe(); };
-  }, [currentUid, requirePermission]);
-  const editingProfile = profiles.find((p) => p.uid === editingUid);
-  useEffect(() => {
-    if (editingUid && !canManageAuthorizationProfile(managerProfile, editingProfile)) {
-      setEditingUid(null);
-      setUsersError("You are no longer authorized to edit this authorization profile, or it no longer exists.");
-    }
-  }, [editingUid, editingProfile, managerProfile]);
-  const openProfileEditor = (profile) => {
-    if (!requirePermission("canManageUsers") || !canManageAuthorizationProfile(managerProfile, profile) ||
-        (profile.role === "owner" && !requirePermission("canManageOwners"))) {
-      setUsersError("You are not authorized to edit this authorization profile.");
-      return;
-    }
-    setUsersError("");
-    setEditingUid(profile.uid);
-  };
-  return (
-    <div style={{ maxWidth: 1000, margin: "0 auto", padding: 24 }}>
-      <button className="hg-btn" onClick={onClose} style={userButtonStyle}><ArrowLeft size={14} /> Back to list</button>
-      <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 32, marginTop: 20 }}>Authorized Users</div>
-      <p style={{ color: "#8A93A0", fontSize: 13 }}>Manage existing Firestore authorization profiles. Changes take effect live. This screen does not create, disable, or modify Firebase Authentication accounts.</p>
-      {usersError && <div role="alert" style={{ color: "#d98a7c", marginBottom: 16 }}>{usersError}</div>}
-      {!ready ? <div style={{ color: "#8A93A0" }}>Loading authorization profiles…</div> : (
-        <div className="hg-scroll" style={{ overflowX: "auto", border: "1px solid #3B2A1E", borderRadius: 8 }}>
-          <table style={{ width: "100%", minWidth: 650, borderCollapse: "collapse", textAlign: "left", fontFamily: "'Oswald', sans-serif", fontSize: 13 }}>
-            <thead style={{ background: "#1B1E22", color: "#B8894C" }}><tr>{["Name", "Email", "Role", "Territory", "Status", ""].map((label, i) => <th key={i} scope="col" style={{ padding: 12 }}>{label}</th>)}</tr></thead>
-            <tbody>{profiles.map((profile) => (
-              <tr key={profile.uid} style={{ borderTop: "1px solid #2c3036" }}>
-                <td style={{ padding: 12 }}>{profile.displayName || "—"}{profile.uid === currentUid ? " (you)" : ""}</td>
-                <td style={{ padding: 12 }}>{profile.email || "—"}</td>
-                <td style={{ padding: 12 }}>{isValidRole(profile.role) ? ROLE_LABELS[profile.role] : "Unknown role"}</td>
-                <td style={{ padding: 12 }}>{profile.territory || "—"}</td>
-                <td style={{ padding: 12, color: profile.active === true ? "#B8894C" : "#d98a7c" }}>{profile.active === true ? "Active" : "Disabled"}</td>
-                <td style={{ padding: 12 }}>{canManageAuthorizationProfile(managerProfile, profile) && <button className="hg-btn" onClick={() => openProfileEditor(profile)} style={userButtonStyle}>Edit</button>}</td>
-              </tr>
-            ))}</tbody>
-          </table>
-          {!profiles.length && !usersError && <div style={{ padding: 16, color: "#8A93A0" }}>No authorization profiles found.</div>}
-        </div>
-      )}
-      {canManageAuthorizationProfile(managerProfile, editingProfile) && <AuthorizationProfileEditor key={editingProfile.uid} profile={editingProfile} currentUid={currentUid} managerProfile={managerProfile} onSave={onSave} onClose={() => setEditingUid(null)} />}
-    </div>
-  );
-}
 
 function fileToCompressedDataUrl(file, maxDim = 480, quality = 0.6) {
   return new Promise((resolve, reject) => {
