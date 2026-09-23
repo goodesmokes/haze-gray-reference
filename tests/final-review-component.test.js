@@ -11,6 +11,7 @@ const root = nodeText(source, nodes, 'HazeGrayReference');
 const finalSource = readRepositoryFile('js/components/final-review.mjs');
 const finalNodes = collectNamedNodes(finalSource, (name) => name === 'FinalReview');
 const finalReview = nodeText(finalSource, finalNodes, 'FinalReview');
+const orderBuilder = readRepositoryFile('js/components/order-builder.mjs');
 
 test('SaveOrderPanel restores a UID-scoped pending receipt and preserves the remount boundary', () => {
   assert.match(savePanel, /const storageKey = `haze-gray-cigars\.pending-order-save\.v1\.\$\{user\.uid\}`/);
@@ -69,7 +70,8 @@ test('Final Review preserves retailer, notes, line pricing and order-total rende
 test('Final Review preserves permission and empty-order gates plus Save/Continue/Start New wiring', () => {
   assert.match(root, /showFinalReview && canUseFinalReview/);
   assert.match(root, /const openFinalReview = \(\) => \{[\s\S]*?if \(!requirePermission\("canUseFinalReview"\)\) return;[\s\S]*?setShowFinalReview\(true\)/);
-  assert.match(root, /orderItems\.length > 0 && \([\s\S]*?onClick=\{openFinalReview\}/);
+  assert.match(orderBuilder, /orderItems\.length > 0 && h\("div"[\s\S]*?canUseFinalReview && h\("button", \{ className: "hg-btn", onClick: onFinalReview/);
+  assert.match(root, /<OrderBuilder[\s\S]*?canUseFinalReview=\{canUseFinalReview\}[\s\S]*?onFinalReview=\{openFinalReview\}/);
   assert.match(root, /<FinalReview draft=\{activeDraft\}[\s\S]*?onContinue=\{openOrderBuilder\}[\s\S]*?onStartNew=\{\(\) => \{ clearOrder\(\); openOrderBuilder\(\); \}\}/);
   assert.match(finalReview, /h\(SaveOrderPanel, \{ key: `\$\{user\.uid\}:\$\{userProfile\.role\}`[\s\S]*?onContinue, onStartNew \}\)/);
   assert.match(savePanel, /buildSavedOrder\(draft, user, profile\)/);

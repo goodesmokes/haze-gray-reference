@@ -1,16 +1,14 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { loadClient } = require('./client-helpers.cjs');
-const { collectNamedNodes, extractInlineModule, nodeText } = require('./test-support.cjs');
+const { collectNamedNodes, extractInlineModule, nodeText, readRepositoryFile } = require('./test-support.cjs');
 
 const source = extractInlineModule();
 const names = ['HazeGrayReference', 'addToOrder', 'setOrderQty', 'removeOrderItem', 'clearOrder', 'selectOrderRetailer', 'openOrderBuilder', 'openFinalReview', 'openOrderFromCompare'];
 const nodes = collectNamedNodes(source, (name) => names.includes(name));
 const root = nodeText(source, nodes, 'HazeGrayReference');
 const text = (name) => nodeText(source, nodes, name);
-const builderStart = root.indexOf(') : showOrderBuilder && canUseOrderBuilder ? (');
-assert(builderStart >= 0, 'Order Builder branch');
-const builder = root.slice(builderStart);
+const builder = readRepositoryFile('js/components/order-builder.mjs');
 const client = loadClient();
 const compile = (name, environment) => Function(...Object.keys(environment), `return ${text(name)}`)(...Object.values(environment));
 
@@ -33,12 +31,12 @@ test('Order Builder preserves linked/manual retailer modes and controlled fields
   assert.equal(state.retailerId, '');
   assert.equal(state.name, 'Linked Shop', 'manual mode preserves the captured name');
   assert.equal(state.email, 'shop@example.test', 'manual mode preserves the captured email');
-  assert.match(builder, /<select aria-label="Order retailer" value=\{retailerId\} onChange=\{\(e\) => selectOrderRetailer\(e\.target\.value\)\}/);
+  assert.match(builder, /"aria-label": "Order retailer", value: retailerId, onChange: \(event\) => onSelectRetailer\(event\.target\.value\)/);
   assert.match(builder, /One-time \/ Manual Retailer/);
   assert.match(builder, /Linked retailer unavailable/);
-  assert.equal((builder.match(/disabled=\{Boolean\(retailerId\)\}/g) || []).length, 2);
+  assert.equal((builder.match(/disabled: Boolean\(retailerId\)/g) || []).length, 2);
   assert.match(builder, /Switch to manual entry to edit name\/email/);
-  assert.match(builder, /directory\.error[\s\S]*?onClick=\{directory\.reload\}>Reload Retailers/);
+  assert.match(builder, /directory\.error[\s\S]*?onClick: directory\.reload \}, "Reload Retailers"/);
 });
 
 test('Order Builder add-line behavior preserves identity, pricing and duplicate configuration merging', () => {
@@ -114,16 +112,16 @@ test('Order Builder preserves the saved-order 100-line boundary without adding a
 });
 
 test('Order Builder navigation and comparison handoff remain wired to root callbacks', () => {
-  assert.match(builder, /onClick=\{\(\) => setShowOrderBuilder\(false\)\}[\s\S]*?Back to list/);
-  assert.match(builder, /onClick=\{openFinalReview\}[\s\S]*?Final Review/);
-  assert.match(builder, /\{li\.cigarName\} — \{li\.vitola\}/);
-  assert.doesNotMatch(builder, /setSelectedId\(li\.cigarId\)/, 'Order Builder currently has no catalog-item navigation action');
+  assert.match(root, /<OrderBuilder[\s\S]*?onClose=\{\(\) => setShowOrderBuilder\(false\)\}/);
+  assert.match(root, /<OrderBuilder[\s\S]*?onFinalReview=\{openFinalReview\}/);
+  assert.match(builder, /line\.cigarName, " — ", line\.vitola/);
+  assert.doesNotMatch(builder, /setSelectedId|onSelectCigar/, 'Order Builder currently has no catalog-item navigation action');
   const handoff = text('openOrderFromCompare');
   assert.match(handoff, /setCompareOrderId\(cigarId\)/);
   assert.match(handoff, /setShowCompare\(false\)/);
   assert.match(handoff, /setShowOrderBuilder\(true\)/);
   assert.match(handoff, /document\.getElementById\(`order-cigar-\$\{cigarId\}`\)/);
-  assert.match(builder, /border: compareOrderId === c\.id/);
+  assert.match(builder, /border: compareOrderId === cigar\.id/);
   assert.match(text('addToOrder'), /if \(compareOrderId === cigar\.id\) \{[\s\S]*?setCompareOrderId\(null\)/);
 });
 
@@ -143,5 +141,15 @@ test('Order Builder draft identity, persistence and permission-loss cleanup rema
   assert.match(text('openOrderBuilder'), /setShowFinalReview\(false\)[\s\S]*?setShowOrderBuilder\(true\)/);
   assert.match(root, /if \(!canUseOrderBuilder\) \{ setShowOrderBuilder\(false\); setCompareOrderId\(null\); \}/);
   assert.match(root, /if \(!accessRef\.current\.permissions\.canUseOrderBuilder\) clearProtectedDraft\(\)/);
-  assert.match(builder, /showOrderBuilder && canUseOrderBuilder/);
+  assert.match(root, /showOrderBuilder && canUseOrderBuilder/);
+});
+
+test('Order Builder is extracted without moving root draft ownership or adding duplicate production UI', () => {
+  assert.match(source, /import \{ OrderBuilder \} from "\.\/js\/components\/order-builder\.mjs"/);
+  assert.match(builder, /export function OrderBuilder\(/);
+  assert.doesNotMatch(source, /function OrderBuilder\s*\(/);
+  assert.equal((source.match(/<OrderBuilder\b/g) || []).length, 1);
+  assert.doesNotMatch(source, /Select Existing Retailer or Manual Entry/);
+  assert.match(root, /<OrderBuilder draft=\{activeDraft\}/);
+  assert.match(root, /const activeDraft = \{ orderItems, orderRetailer, orderEmail, orderNotes, retailerId \}/);
 });
