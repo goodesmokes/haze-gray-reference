@@ -1,10 +1,12 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { collectNamedNodes, extractInlineModule, nodeText } = require('./test-support.cjs');
+const { collectNamedNodes, extractInlineModule, nodeText, parseModule, readRepositoryFile } = require('./test-support.cjs');
 
 const source = extractInlineModule();
-const nodes = collectNamedNodes(source, (name) => ['SaveOrderPanel', 'HazeGrayReference', 'openFinalReview', 'emailOrder', 'copyOrderText'].includes(name));
-const savePanel = nodeText(source, nodes, 'SaveOrderPanel');
+const nodes = collectNamedNodes(source, (name) => ['HazeGrayReference', 'openFinalReview', 'emailOrder', 'copyOrderText'].includes(name));
+const panelSource = readRepositoryFile('js/components/save-order-panel.mjs');
+const panelNodes = collectNamedNodes(panelSource, (name) => name === 'SaveOrderPanel');
+const savePanel = nodeText(panelSource, panelNodes, 'SaveOrderPanel');
 const root = nodeText(source, nodes, 'HazeGrayReference');
 const finalStart = root.indexOf(') : showFinalReview && canUseFinalReview ? (');
 const finalEnd = root.indexOf(') : showOrderBuilder && canUseOrderBuilder ? (', finalStart);
@@ -34,7 +36,7 @@ test('SaveOrderPanel persists before writing and retries the same order ID', () 
   assert.match(savePanel, /let pending = attemptRef\.current/);
   assert.match(savePanel, /if \(useCurrentDraft\) \{[\s\S]*?pending = \{ \.\.\.pending, payload: buildSavedOrder\(draft, user, profile\) \}/);
   assert.match(savePanel, /attemptRef\.current = pending; setAttempt\(pending\)/);
-  assert.match(savePanel, /onClick=\{\(\) => save\(true\)\}>Retry This ID With Current Draft/);
+  assert.match(savePanel, /onClick: \(\) => save\(true\) \}, "Retry This ID With Current Draft"/);
   assert.match(savePanel, /Retry uses that captured order, even if you have since edited the draft\./);
   assert.doesNotMatch(saveAction, /localStorage\.removeItem/, 'failed or uncertain saves keep the receipt');
 });
@@ -46,7 +48,7 @@ test('SaveOrderPanel preserves busy, mounted, messaging and finish callback guar
   assert.match(savePanel, /if \(mounted\.current && permitted\(\)\) \{ setSaved\(true\); setMessage\("This order has been recorded in Order History\. Your active draft has not been cleared\."\); \}/);
   assert.match(savePanel, /if \(mounted\.current && permitted\(\)\) \{[\s\S]*?Save could not be confirmed:[\s\S]*?Retry checks the same order ID\. Your draft is unchanged\./);
   assert.match(savePanel, /finally \{ busy\.current = false; if \(mounted\.current\) setSaving\(false\); \}/);
-  assert.match(savePanel, /disabled=\{saving \|\| \(!attempt && !draft\.orderItems\.length\)\}/);
+  assert.match(savePanel, /disabled: saving \|\| \(!attempt && !draft\.orderItems\.length\)/);
   assert.match(savePanel, /if \(startNew\) onStartNew\(\); else onContinue\(\)/);
   assert.match(savePanel, /Continue Editing Current Order/);
   assert.match(savePanel, /Start New Order \(clear current draft\)/);
@@ -72,7 +74,7 @@ test('Final Review preserves permission and empty-order gates plus Save/Continue
   assert.match(finalReview, /<SaveOrderPanel key=\{`\$\{user\.uid\}:\$\{userProfile\.role\}`\}[\s\S]*?onContinue=\{openOrderBuilder\}/);
   assert.match(finalReview, /onStartNew=\{\(\) => \{ clearOrder\(\); openOrderBuilder\(\); \}\}/);
   assert.match(savePanel, /buildSavedOrder\(draft, user, profile\)/);
-  assert.match(savePanel, /disabled=\{saving \|\| \(!attempt && !draft\.orderItems\.length\)\}/);
+  assert.match(savePanel, /disabled: saving \|\| \(!attempt && !draft\.orderItems\.length\)/);
 });
 
 test('Final Review preserves email/copy actions and their current failure contracts', () => {
@@ -84,4 +86,14 @@ test('Final Review preserves email/copy actions and their current failure contra
   assert.doesNotMatch(finalReview, /catch\s*\(/, 'Final Review currently has no copy/email failure UI');
   assert.match(finalReview, /Email Order/);
   assert.match(finalReview, /\{copyConfirmed \? "Copied!" : "Copy Order"\}/);
+});
+
+test('app imports the extracted SaveOrderPanel without a duplicate implementation', () => {
+  const imports = parseModule(source).program.body.filter((node) => node.type === 'ImportDeclaration');
+  const panelImport = imports.find((node) => node.source.value === './js/components/save-order-panel.mjs');
+  assert.deepEqual(panelImport.specifiers.map((node) => node.imported.name), ['SaveOrderPanel']);
+  assert.deepEqual([...collectNamedNodes(source, (name) => name === 'SaveOrderPanel').keys()], []);
+  assert.deepEqual([...panelNodes.keys()], ['SaveOrderPanel']);
+  assert.match(panelSource, /export function SaveOrderPanel/);
+  assert.doesNotMatch(root, /haze-gray-cigars\.pending-order-save|attemptRef|savePendingOrder/);
 });

@@ -164,16 +164,18 @@ test('service accepts current and legacy prices and rejects unavailable configur
   await assert.rejects(createOrderService({ db: {}, auth, api: fakeApi({}).api }).savePendingOrder(pending, 'rep', () => true, currentCatalog, []), /no longer available/);
 });
 
-test('index imports order service without duplicate service declarations', () => {
+test('extracted UI imports order service without duplicate service declarations', () => {
   const source = extractInlineModule();
   const ast = parseModule(source);
-  const serviceImport = ast.program.body.find((node) => node.type === 'ImportDeclaration' && node.source.value === './js/services/order-service.mjs');
-  assert(serviceImport, 'order service import');
-  assert.deepEqual(serviceImport.specifiers.map((node) => node.imported.name), ['savePendingOrder']);
+  assert.equal(ast.program.body.some((node) => node.type === 'ImportDeclaration' && node.source.value === './js/services/order-service.mjs'), false);
+  const panelSource = readRepositoryFile('js/components/save-order-panel.mjs');
+  const panelImport = parseModule(panelSource).program.body.find((node) => node.type === 'ImportDeclaration' && node.source.value === '../services/order-service.mjs');
+  assert.deepEqual(panelImport.specifiers.map((node) => node.imported.name), ['savePendingOrder']);
   const historySource = readRepositoryFile('js/components/order-history.mjs');
   const historyImport = parseModule(historySource).program.body.find((node) => node.type === 'ImportDeclaration' && node.source.value === '../services/order-service.mjs');
   assert.deepEqual(historyImport.specifiers.map((node) => node.imported.name), ['subscribeOrderHistory']);
   const localNodes = collectNamedNodes(source, (name) => ['savePendingOrder', 'subscribeOrderHistory'].includes(name));
   assert.deepEqual([...localNodes.keys()], []);
+  assert.deepEqual([...collectNamedNodes(panelSource, (name) => ['savePendingOrder', 'subscribeOrderHistory'].includes(name)).keys()], []);
   assert.deepEqual([...collectNamedNodes(historySource, (name) => ['savePendingOrder', 'subscribeOrderHistory'].includes(name)).keys()], []);
 });

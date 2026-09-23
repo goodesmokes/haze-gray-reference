@@ -1,15 +1,14 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { createRoot } from "react-dom/client";
 import { Plus, X, ChevronRight, ArrowLeft, Cigarette, Upload, Loader2, Mail, Copy, ShoppingCart, Minus } from "lucide-react";
-import { doc, collection, onSnapshot } from "firebase/firestore";
+import { doc, onSnapshot } from "firebase/firestore";
 import { parseMoney, getNumericPrice, getSinglePrice } from "./js/domain/pricing.mjs";
 import { ROLE_LABELS, NO_PERMISSIONS, ROLE_PERMISSIONS, isValidRole, isActiveProfile, getProfilePermissions } from "./js/domain/authorization.mjs";
 import { normalizeRetailerName, validRetailerId } from "./js/domain/retailers.mjs";
-import { nonnegativeMoney, isReadableSavedOrder, buildSavedOrder, buildReorderPlan, mergeReorderItems } from "./js/domain/saved-orders.mjs";
+import { nonnegativeMoney, isReadableSavedOrder, buildReorderPlan, mergeReorderItems } from "./js/domain/saved-orders.mjs";
 import { newSizeRow, SEED_CIGARS, EMPTY_FORM, PACK_OPTIONS } from "./js/domain/catalog-data.mjs";
 import { db, auth } from "./js/services/firebase.mjs";
 import { subscribeCatalog, isLegacyCatalogMigrationAvailable, saveCatalogRecord, deleteCatalogRecord, readLegacyCatalog } from "./js/services/catalog-service.mjs";
-import { savePendingOrder } from "./js/services/order-service.mjs";
 import { subscribeAssignmentProfiles, subscribeRetailerDirectory } from "./js/services/retailer-service.mjs";
 import { saveAuthorizationProfile as saveAuthorizationProfileService } from "./js/services/profile-service.mjs";
 import { signInWithEmail, signOutUser, subscribeAuthState } from "./js/services/auth-service.mjs";
@@ -20,6 +19,7 @@ import { ComparisonView } from "./js/components/comparison-view.mjs";
 import { CatalogList } from "./js/components/catalog-list.mjs";
 import { CigarDetail } from "./js/components/cigar-detail.mjs";
 import { OrderHistory } from "./js/components/order-history.mjs";
+import { SaveOrderPanel } from "./js/components/save-order-panel.mjs";
 
 // Application authorization only. Firestore Security Rules remain the enforcement boundary.
 
@@ -89,67 +89,6 @@ function loadOrderDraft(uid) {
 
 const orderMoney = (value) => Number.isFinite(value) ? `$${value.toFixed(2)}` : "Not recorded";
 const savedOrderDate = (value) => value?.toDate ? value.toDate().toLocaleString() : "Date unavailable";
-function SaveOrderPanel({ draft, user, profile, cigars, packOptions, requirePermission, onContinue, onStartNew }) {
-  const storageKey = `haze-gray-cigars.pending-order-save.v1.${user.uid}`;
-  const [attempt, setAttempt] = useState(() => {
-    try { const value = JSON.parse(localStorage.getItem(storageKey)); return value?.uid === user.uid && typeof value.id === "string" && value.payload ? value : null; } catch { return null; }
-  });
-  const attemptRef = useRef(attempt);
-  const busy = useRef(false);
-  const mounted = useRef(true);
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [message, setMessage] = useState("");
-  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
-  const permitted = () => auth.currentUser?.uid === user.uid && requirePermission("canUseFinalReview");
-  const save = async (useCurrentDraft = false) => {
-    if (busy.current || saved || !permitted()) return;
-    busy.current = true; setSaving(true); setMessage("");
-    try {
-      let pending = attemptRef.current;
-      if (!pending) {
-        pending = { uid: user.uid, id: doc(collection(db, "orders")).id, payload: buildSavedOrder(draft, user, profile) };
-        // Persist before any network write so reloads and uncertain retries keep the same ID/payload.
-        localStorage.setItem(storageKey, JSON.stringify(pending));
-        attemptRef.current = pending; setAttempt(pending);
-      }
-      if (useCurrentDraft) {
-        pending = { ...pending, payload: buildSavedOrder(draft, user, profile) };
-        localStorage.setItem(storageKey, JSON.stringify(pending));
-        attemptRef.current = pending; setAttempt(pending);
-      }
-      await savePendingOrder(pending, user.uid, permitted, cigars, packOptions);
-      if (mounted.current && permitted()) { setSaved(true); setMessage("This order has been recorded in Order History. Your active draft has not been cleared."); }
-    } catch (e) {
-      if (mounted.current && permitted()) {
-        setMessage(`Save could not be confirmed: ${e.message} Retry checks the same order ID. Your draft is unchanged.`);
-      }
-    } finally { busy.current = false; if (mounted.current) setSaving(false); }
-  };
-  let priceCheck = null;
-  try { priceCheck = buildReorderPlan(attempt?.payload || buildSavedOrder(draft, user, profile), cigars, packOptions, []); } catch { /* Save reports invalid draft details. */ }
-  const priceChanges = priceCheck?.available.filter((item) => item.historicalPrice !== item.line.unitPrice) || [];
-  const finish = (startNew) => {
-    if (!permitted()) return;
-    try { localStorage.removeItem(storageKey); } catch (e) { setMessage("Could not clear the save receipt. Retry before starting another save."); return; }
-    attemptRef.current = null; setAttempt(null); setSaved(false);
-    if (startNew) onStartNew(); else onContinue();
-  };
-  return <div style={{ border: "1px solid #3B2A1E", borderRadius: 8, padding: 16, marginBottom: 20 }}>
-    <div style={{ fontFamily: "'Oswald', sans-serif", color: "#8A93A0", fontSize: 13, marginBottom: 10 }}>Save an internal reference record using the captured draft prices. Prices and totals are not independently server-verified. This does not send email, submit, fulfill, or collect payment.</div>
-    {!saved && <p style={{ color: "#B8894C", fontSize: 13 }}>Before saving, review draft prices against the current catalog. Saving preserves the captured prices; a reorder uses current prices. Unavailable configurations cannot be saved as a new record.</p>}
-    {attempt && !saved && <p style={{ color: "#B8894C", fontSize: 13 }}>Pending save {attempt.id}: {attempt.payload.retailerName || "Retailer not recorded"} · {orderMoney(attempt.payload.totals?.wholesaleTotal)}. Retry uses that captured order, even if you have since edited the draft.</p>}
-    {!saved && <button className="hg-btn" onClick={() => save()} disabled={saving || (!attempt && !draft.orderItems.length)} style={userButtonStyle}>{saving ? "Saving…" : attempt ? "Check / Retry Saved Order" : "Save to Order History"}</button>}
-    {!saved && priceChanges.length > 0 && <p style={{ color: "#B8894C", fontSize: 13 }}>Current catalog differs: {priceChanges.map((item) => item.line.cigarName + " / " + item.line.vitola + " / " + item.line.packLabel + ": captured " + orderMoney(item.historicalPrice) + ", current " + orderMoney(item.line.unitPrice)).join("; ")}. Save records the captured prices shown above.</p>}
-    {attempt && !saved && <div style={{ marginTop: 10 }}><button className="hg-btn" style={userButtonStyle} disabled={saving || !draft.orderItems.length} onClick={() => save(true)}>Retry This ID With Current Draft</button><p style={{ color: "#8A93A0", fontSize: 12 }}>Use this only to replace a rejected captured attempt. Any record already saved under this ID remains unchanged.</p></div>}
-    {message && <p role="status" style={{ color: saved ? "#B8894C" : "#d98a7c", fontSize: 13 }}>{message}</p>}
-    {saved && <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
-      <button className="hg-btn" onClick={() => finish(false)} style={userButtonStyle}>Continue Editing Current Order</button>
-      <button className="hg-btn" onClick={() => finish(true)} style={userButtonStyle}>Start New Order (clear current draft)</button>
-    </div>}
-  </div>;
-}
-
 const hasMeaningfulDraft = (draft) => Boolean(draft.retailerId || draft.orderItems.length || [draft.orderRetailer, draft.orderEmail, draft.orderNotes].some((value) => value.trim()));
 const retailerOrderFields = (retailer) => {
   if (!retailer?.active || !validRetailerId(retailer.id)) throw new Error("This retailer is no longer available for new orders.");

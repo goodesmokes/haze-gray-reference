@@ -25,7 +25,6 @@ test('index.html remains the application entry point with its React root and mou
   assert(imports.some((node) => node.source.value === './js/domain/catalog-data.mjs'));
   assert(imports.some((node) => node.source.value === './js/services/firebase.mjs'));
   assert(imports.some((node) => node.source.value === './js/services/catalog-service.mjs'));
-  assert(imports.some((node) => node.source.value === './js/services/order-service.mjs'));
   assert(imports.some((node) => node.source.value === './js/services/retailer-service.mjs'));
   assert(imports.some((node) => node.source.value === './js/services/profile-service.mjs'));
   assert(imports.some((node) => node.source.value === './js/services/auth-service.mjs'));
@@ -36,6 +35,7 @@ test('index.html remains the application entry point with its React root and mou
   assert(imports.some((node) => node.source.value === './js/components/catalog-list.mjs'));
   assert(imports.some((node) => node.source.value === './js/components/cigar-detail.mjs'));
   assert(imports.some((node) => node.source.value === './js/components/order-history.mjs'));
+  assert(imports.some((node) => node.source.value === './js/components/save-order-panel.mjs'));
 
   let rootLookup = false, appMount = false;
   traverse(ast, {
