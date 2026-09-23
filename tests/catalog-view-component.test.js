@@ -14,6 +14,9 @@ const comparison = comparisonSource.slice(comparisonNodes.get('ComparisonView').
 const catalogListSource = readRepositoryFile('js/components/catalog-list.mjs');
 const catalogListNodes = collectNamedNodes(catalogListSource, (name) => name === 'CatalogList');
 const catalogList = catalogListSource.slice(catalogListNodes.get('CatalogList').start, catalogListNodes.get('CatalogList').end);
+const cigarDetailSource = readRepositoryFile('js/components/cigar-detail.mjs');
+const cigarDetailNodes = collectNamedNodes(cigarDetailSource, (name) => name === 'CigarDetail');
+const cigarDetail = cigarDetailSource.slice(cigarDetailNodes.get('CigarDetail').start, cigarDetailNodes.get('CigarDetail').end);
 const rootVariables = new Map();
 traverse(ast, {
   VariableDeclarator(path) {
@@ -119,17 +122,18 @@ test('app imports the extracted catalog list without retaining a duplicate imple
 
 test('cigar detail preserves identity, fallbacks, display wiring and permission gates', () => {
   assert.match(root, /const selected = cigars\.find\(\(c\) => c\.id === selectedId\)/);
-  assert.match(root, /selected\.imageUrl \? \([\s\S]*?<img src=\{selected\.imageUrl\} alt=\{selected\.name\}[\s\S]*?: \([\s\S]*?<Cigarette size=\{56\}/);
-  assert.match(root, /<Gauge value=\{selected\.strength\} label="Strength" \/>/);
-  assert.match(root, /<Gauge value=\{selected\.body\} label="Body" \/>/);
-  assert.match(root, /<Tag key=\{i\} tone="brass">\{n\}<\/Tag>/);
-  assert.match(root, /<Tag key=\{i\} tone="steel">\{n\}<\/Tag>/);
-  assert.match(root, /No sizes on file\./);
-  assert.match(root, /\{s\.msrp \|\| "—"\}/);
-  assert.match(root, /\{s\.keystoneSingle \|\| "—"\}/);
-  assert.match(root, /\{canEditCatalog \? \([\s\S]*?openEdit\(selected\)[\s\S]*?setConfirmDeleteId\(selected\.id\)/);
-  assert.match(root, /\{canUseOrderBuilder && <DetailOrderControls/);
-  assert.match(root, /onClick=\{\(\) => setSelectedId\(null\)\}[\s\S]*?Back to list/);
+  assert.match(cigarDetail, /selected\.imageUrl \? h\("img", \{ src: selected\.imageUrl, alt: selected\.name[\s\S]*?: h\(Cigarette, \{ size: 56/);
+  assert.match(cigarDetail, /h\(Gauge, \{ value: selected\.strength, label: "Strength" \}\)/);
+  assert.match(cigarDetail, /h\(Gauge, \{ value: selected\.body, label: "Body" \}\)/);
+  assert.match(cigarDetail, /h\(Tag, \{ key: index, tone: "brass" \}, note\)/);
+  assert.match(cigarDetail, /h\(Tag, \{ key: index, tone: "steel" \}, pairing\)/);
+  assert.match(cigarDetail, /No sizes on file\./);
+  assert.match(cigarDetail, /size\.msrp \|\| "—"/);
+  assert.match(cigarDetail, /size\.keystoneSingle \|\| "—"/);
+  assert.match(cigarDetailSource, /const margins = computePackageMargins\(size\)/);
+  assert.match(cigarDetail, /canEditCatalog[\s\S]*?onClick: \(\) => onEdit\(selected\)[\s\S]*?onClick: \(\) => onDelete\(selected\.id\)/);
+  assert.match(cigarDetail, /onClick: onBack/);
+  assert.match(root, /<CigarDetail selected=\{selected\} canEditCatalog=\{canEditCatalog\}[\s\S]*?onBack=\{\(\) => setSelectedId\(null\)\} onEdit=\{openEdit\} onDelete=\{setConfirmDeleteId\}/);
 });
 
 test('DetailOrderControls remains cigar-keyed and initializes fresh size, package and quantity state', () => {
@@ -141,4 +145,14 @@ test('DetailOrderControls remains cigar-keyed and initializes fresh size, packag
   assert.match(detailControls, /setPackKey\(firstSize \? packagesFor\(firstSize\)\[0\]\.key : ""\)/);
   assert.match(detailControls, /setQuantity\("1"\)/);
   assert.match(detailControls, /onAdd\(cigar, size, pack\.key, qty\)/);
+});
+
+test('app imports the extracted cigar detail without retaining a duplicate implementation', () => {
+  const imports = ast.program.body.filter((node) => node.type === 'ImportDeclaration');
+  const cigarDetailImport = imports.find((node) => node.source.value === './js/components/cigar-detail.mjs');
+  assert.deepEqual(cigarDetailImport.specifiers.map((node) => node.imported.name), ['CigarDetail']);
+  assert.deepEqual([...collectNamedNodes(source, (name) => name === 'CigarDetail').keys()], []);
+  assert.deepEqual([...cigarDetailNodes.keys()], ['CigarDetail']);
+  assert.match(cigarDetailSource, /export function CigarDetail/);
+  assert.doesNotMatch(root, /selected\.imageUrl|selected\.tastingNotes|selected\.pairings/);
 });

@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { createRoot } from "react-dom/client";
-import { Plus, X, ChevronRight, ArrowLeft, Pencil, Trash2, Cigarette, Upload, Loader2, Mail, Copy, ShoppingCart, Minus } from "lucide-react";
+import { Plus, X, ChevronRight, ArrowLeft, Cigarette, Upload, Loader2, Mail, Copy, ShoppingCart, Minus } from "lucide-react";
 import { doc, collection, onSnapshot } from "firebase/firestore";
-import { parseMoney, getNumericPrice, getSinglePrice, computePackageMargins } from "./js/domain/pricing.mjs";
+import { parseMoney, getNumericPrice, getSinglePrice } from "./js/domain/pricing.mjs";
 import { ROLE_LABELS, NO_PERMISSIONS, ROLE_PERMISSIONS, isValidRole, isActiveProfile, getProfilePermissions } from "./js/domain/authorization.mjs";
 import { normalizeRetailerName, validRetailerId } from "./js/domain/retailers.mjs";
 import { nonnegativeMoney, isReadableSavedOrder, buildSavedOrder, buildReorderPlan, mergeReorderItems } from "./js/domain/saved-orders.mjs";
@@ -14,11 +14,11 @@ import { subscribeAssignmentProfiles, subscribeRetailerDirectory } from "./js/se
 import { saveAuthorizationProfile as saveAuthorizationProfileService } from "./js/services/profile-service.mjs";
 import { signInWithEmail, signOutUser, subscribeAuthState } from "./js/services/auth-service.mjs";
 import { userFieldStyle, userButtonStyle } from "./js/ui/styles.mjs";
-import { Gauge, Tag } from "./js/components/common-ui.mjs";
 import { AuthorizationProfileEditor, AuthorizedUsers } from "./js/components/authorization-ui.mjs";
 import { RetailerDirectory } from "./js/components/retailer-directory.mjs";
 import { ComparisonView } from "./js/components/comparison-view.mjs";
 import { CatalogList } from "./js/components/catalog-list.mjs";
+import { CigarDetail } from "./js/components/cigar-detail.mjs";
 
 // Application authorization only. Firestore Security Rules remain the enforcement boundary.
 
@@ -2024,222 +2024,7 @@ const text = [
       ) : showCompare && compareIds.length >= 2 ? (
         <ComparisonView compareIds={compareIds} cigars={cigars} canUseOrderBuilder={canUseOrderBuilder} strengthWord={strengthWord} onClose={() => setShowCompare(false)} onBuildOrder={openOrderFromCompare} />
       ) : selected ? (
-        // ---------- DETAIL VIEW ----------
-        <div style={{ maxWidth: 900, margin: "0 auto", padding: "24px" }}>
-          <button className="hg-btn" onClick={() => setSelectedId(null)} style={{
-            display: "flex", alignItems: "center", gap: 6, background: "none", border: "none",
-            color: "#B8894C", fontFamily: "'Oswald', sans-serif", fontSize: 13, letterSpacing: 1,
-            textTransform: "uppercase", padding: "6px 0", marginBottom: 18,
-          }}>
-            <ArrowLeft size={16} /> Back to list
-          </button>
-
-          <div style={{
-            border: "1px solid #3B2A1E", borderRadius: 8, overflow: "hidden",
-            background: "linear-gradient(180deg, #1d1712 0%, #171310 100%)",
-          }}>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 0 }}>
-              <div style={{
-                width: 220, minHeight: 220, flex: "0 0 220px", background: "#0e0d0b",
-                display: "flex", alignItems: "center", justifyContent: "center", borderRight: "1px solid #3B2A1E",
-              }}>
-                {selected.imageUrl ? (
-                  <img src={selected.imageUrl} alt={selected.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                ) : (
-                  <Cigarette size={56} color="#454b53" />
-                )}
-              </div>
-              <div style={{ flex: "1 1 300px", padding: "22px 24px" }}>
-                {selected.line && (
-                  <div style={{ fontFamily: "'Oswald', sans-serif", fontSize: 12, letterSpacing: 2, color: "#B8894C", textTransform: "uppercase" }}>
-                    {selected.line}
-                  </div>
-                )}
-                <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 44, letterSpacing: 1, lineHeight: 1.05, margin: "2px 0 10px" }}>
-                  {selected.name}
-                </div>
-                <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
-                  <Gauge value={selected.strength} label="Strength" />
-                  <Gauge value={selected.body} label="Body" />
-                </div>
-              </div>
-            </div>
-
-            <div style={{ borderTop: "1px solid #3B2A1E", padding: "20px 24px", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 16 }}>
-              {[
-                ["Wrapper", selected.wrapper],
-                ["Binder", selected.binder],
-                ["Filler", selected.filler],
-                ["Origin", selected.origin],
-              ].map(([label, val]) => (
-                <div key={label}>
-                  <div style={{ fontFamily: "'Oswald', sans-serif", fontSize: 11, letterSpacing: 2, color: "#8A93A0", textTransform: "uppercase" }}>{label}</div>
-                  <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 14.5, color: "#EDE6D6", marginTop: 2 }}>{val || "—"}</div>
-                </div>
-              ))}
-            </div>
-
-            <div style={{ borderTop: "1px solid #3B2A1E", padding: "20px 24px" }}>
-              <div style={{ fontFamily: "'Oswald', sans-serif", fontSize: 11, letterSpacing: 2, color: "#8A93A0", textTransform: "uppercase", marginBottom: 12 }}>Sizes & Pricing</div>
-              {canUseOrderBuilder && <DetailOrderControls key={selected.id} cigar={selected} packOptions={PACK_OPTIONS} orderItems={orderItems} onAdd={addToOrder} onViewOrder={openOrderBuilder} />}
-              {(selected.sizes || []).length === 0 ? (
-                <div style={{ color: "#8A93A0", fontSize: 13.5, fontStyle: "italic" }}>No sizes on file.</div>
-              ) : (
-                <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-                  {selected.sizes.map((s) => (
-                    <div key={s.key} style={{ border: "1px solid #2c3036", borderRadius: 6, overflow: "hidden" }}>
-                      <div style={{
-                        display: "flex", justifyContent: "space-between", alignItems: "center",
-                        padding: "10px 14px", background: "rgba(184,137,76,0.07)", borderBottom: "1px solid #2c3036",
-                      }}>
-                        <div style={{ fontFamily: "'Oswald', sans-serif", fontSize: 14, letterSpacing: 0.5, color: "#E7C79A" }}>
-                          {s.vitola || "—"}{s.dims ? ` · ${s.dims}` : ""}
-                        </div>
-                      </div>
-                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 0 }}>
-                        <div style={{ padding: "12px 14px", borderRight: "1px solid #2c3036" }}>
-                          <div style={{ fontFamily: "'Oswald', sans-serif", fontSize: 10.5, letterSpacing: 1.5, color: "#8A93A0", textTransform: "uppercase", marginBottom: 6 }}>MSRP</div>
-                          <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 18, color: "#B8894C" }}>{s.msrp || "—"}</div>
-                        </div>
-                        <div style={{ padding: "12px 14px" }}>
-                          <div style={{ fontFamily: "'Oswald', sans-serif", fontSize: 10.5, letterSpacing: 1.5, color: "#8A93A0", textTransform: "uppercase", marginBottom: 6 }}>Keystone Pricing</div>
-                          <div style={{ display: "flex", flexDirection: "column", gap: 3, fontFamily: "'JetBrains Mono', monospace", fontSize: 12.5 }}>
-                            <div><span style={{ color: "#8A93A0" }}>Single: </span>{s.keystoneSingle || "—"}</div>
-                            <div><span style={{ color: "#8A93A0" }}>10ct Box: </span>{s.keystoneBox10 || "—"}</div>
-                            <div><span style={{ color: "#8A93A0" }}>20ct Box: </span>{s.keystoneBox20 || "—"}</div>
-                            <div><span style={{ color: "#8A93A0" }}>20ct Bundle: </span>{s.keystoneBundle20 || "—"}</div>
-                          </div>
-                         {(() => {
-  const margins = computePackageMargins(s);
-
-  if (!margins) return null;
-
-  return (
-    <div
-      style={{
-        marginTop: 10,
-        paddingTop: 10,
-        borderTop: "1px dashed #3B2A1E"
-      }}
-    >
-      <div
-        style={{
-          fontFamily: "'Oswald', sans-serif",
-          fontSize: 10,
-          letterSpacing: 1.5,
-          color: "#8A93A0",
-          textTransform: "uppercase",
-          marginBottom: 7
-        }}
-      >
-        Retailer Profit
-      </div>
-
-      <div
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          gap: 8
-        }}
-      >
-        {margins.map((m) => (
-          <div
-            key={m.key}
-            style={{
-              borderLeft: "2px solid #B8894C",
-              paddingLeft: 8
-            }}
-          >
-            <div
-              style={{
-                fontFamily: "'Oswald', sans-serif",
-                fontSize: 11,
-                letterSpacing: 1,
-                color: "#C9CFD6",
-                textTransform: "uppercase"
-              }}
-            >
-              {m.label}
-            </div>
-
-            <div
-              style={{
-                fontFamily: "'JetBrains Mono', monospace",
-                fontSize: 12.5,
-                color: "#E7C79A",
-                marginTop: 2
-              }}
-            >
-              ${m.grossProfit.toFixed(2)} profit ·{" "}
-              {m.marginPct.toFixed(1)}% margin
-            </div>
-
-            <div
-              style={{
-                fontFamily: "'JetBrains Mono', monospace",
-                fontSize: 11.5,
-                color: "#8A93A0",
-                marginTop: 2
-              }}
-            >
-              Cost ${m.cost.toFixed(2)} · Retail $
-              {m.retailValue.toFixed(2)}
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-})()}
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div style={{ borderTop: "1px solid #3B2A1E", padding: "20px 24px" }}>
-              <div style={{ fontFamily: "'Oswald', sans-serif", fontSize: 11, letterSpacing: 2, color: "#8A93A0", textTransform: "uppercase", marginBottom: 8 }}>Tasting Notes</div>
-              {(selected.tastingNotes || []).length ? (selected.tastingNotes || []).map((n, i) => <Tag key={i} tone="brass">{n}</Tag>) : <div style={{ color: "#8A93A0", fontSize: 13.5, fontStyle: "italic" }}>None on file.</div>}
-            </div>
-
-            <div style={{ borderTop: "1px solid #3B2A1E", padding: "20px 24px" }}>
-              <div style={{ fontFamily: "'Oswald', sans-serif", fontSize: 11, letterSpacing: 2, color: "#8A93A0", textTransform: "uppercase", marginBottom: 8 }}>Pairing Suggestions</div>
-              {(selected.pairings || []).length ? (selected.pairings || []).map((n, i) => <Tag key={i} tone="steel">{n}</Tag>) : <div style={{ color: "#8A93A0", fontSize: 13.5, fontStyle: "italic" }}>None on file.</div>}
-            </div>
-
-            {selected.notes && (
-              <div style={{ borderTop: "1px solid #3B2A1E", padding: "20px 24px" }}>
-                <div style={{ fontFamily: "'Oswald', sans-serif", fontSize: 11, letterSpacing: 2, color: "#8A93A0", textTransform: "uppercase", marginBottom: 8 }}>Notes</div>
-                <div style={{ fontStyle: "italic", color: "#C9CFD6", fontSize: 14.5, lineHeight: 1.5 }}>{selected.notes}</div>
-              </div>
-            )}
-
-            <div style={{
-              borderTop: "1px solid #3B2A1E", padding: "18px 24px", display: "flex",
-              justifyContent: "flex-end", alignItems: "center", flexWrap: "wrap", gap: 12,
-              background: "rgba(184,137,76,0.06)",
-            }}>
-              {canEditCatalog ? (
-                <div style={{ display: "flex", gap: 10 }}>
-                  <button className="hg-btn" onClick={() => openEdit(selected)} style={{
-                    display: "flex", alignItems: "center", gap: 6, background: "none", border: "1px solid #6E7681",
-                    color: "#C9CFD6", borderRadius: 4, padding: "8px 14px", fontFamily: "'Oswald', sans-serif", fontSize: 12.5,
-                  }}><Pencil size={14} /> Edit</button>
-                  <button className="hg-btn" onClick={() => setConfirmDeleteId(selected.id)} style={{
-                    display: "flex", alignItems: "center", gap: 6, background: "none", border: "1px solid #A8402E",
-                    color: "#d98a7c", borderRadius: 4, padding: "8px 14px", fontFamily: "'Oswald', sans-serif", fontSize: 12.5,
-                  }}><Trash2 size={14} /> Delete</button>
-                </div>
-              ) : (
-                <div style={{ fontFamily: "'Oswald', sans-serif", fontSize: 12, color: "#5c636b", fontStyle: "italic" }}>
-                  {user ? "Catalog editing is not available for this account" : "Sign in to edit this card"}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
+        <CigarDetail selected={selected} canEditCatalog={canEditCatalog} user={user} orderControls={canUseOrderBuilder ? <DetailOrderControls key={selected.id} cigar={selected} packOptions={PACK_OPTIONS} orderItems={orderItems} onAdd={addToOrder} onViewOrder={openOrderBuilder} /> : null} onBack={() => setSelectedId(null)} onEdit={openEdit} onDelete={setConfirmDeleteId} />
       ) : (
         <CatalogList cigars={cigars} filtered={filtered} groupedFiltered={groupedFiltered} query={query} onQueryChange={setQuery} strengthFilter={strengthFilter} onStrengthFilterChange={setStrengthFilter} sortBy={sortBy} onSortChange={setSortBy} compareMode={compareMode} onToggleCompareMode={() => setCompareMode((mode) => !mode)} compareIds={compareIds} onSelectCigar={setSelectedId} onToggleCompareId={toggleCompareId} onCompare={() => setShowCompare(true)} strengthWord={strengthWord} sizeSummary={sizeSummary} />
       )}

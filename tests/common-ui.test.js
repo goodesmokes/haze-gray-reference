@@ -90,18 +90,21 @@ test('RetailerLocation preserves complete, partial and missing location renderin
   for (const retailer of [{}, { city: '', state: '' }, { city: '  ', state: '  ' }]) assert.equal(ui.RetailerLocation({ retailer }), null);
 });
 
-test('app and extracted directory import shared UI modules without duplicate local declarations', () => {
+test('extracted components import shared UI modules without duplicate local declarations', () => {
   const source = extractInlineModule();
   const ast = parseModule(source);
   const imports = ast.program.body.filter((node) => node.type === 'ImportDeclaration');
   const styleImport = imports.find((node) => node.source.value === './js/ui/styles.mjs');
-  const componentImport = imports.find((node) => node.source.value === './js/components/common-ui.mjs');
   assert.deepEqual(styleImport.specifiers.map((node) => node.imported.name), ['userFieldStyle', 'userButtonStyle']);
-  assert.deepEqual(componentImport.specifiers.map((node) => node.imported.name), ['Gauge', 'Tag']);
+  assert.equal(imports.some((node) => node.source.value === './js/components/common-ui.mjs'), false);
   const directorySource = readRepositoryFile('js/components/retailer-directory.mjs');
   const directoryImports = parseModule(directorySource).program.body.filter((node) => node.type === 'ImportDeclaration');
   const directoryCommonUi = directoryImports.find((node) => node.source.value === './common-ui.mjs');
   assert.deepEqual(directoryCommonUi.specifiers.map((node) => node.imported.name), ['RetailerLocation']);
+  const cigarDetailSource = readRepositoryFile('js/components/cigar-detail.mjs');
+  const detailImports = parseModule(cigarDetailSource).program.body.filter((node) => node.type === 'ImportDeclaration');
+  const detailCommonUi = detailImports.find((node) => node.source.value === './common-ui.mjs');
+  assert.deepEqual(detailCommonUi.specifiers.map((node) => node.imported.name), ['Gauge', 'Tag']);
   const local = collectNamedNodes(source, (name) => ['userFieldStyle', 'userButtonStyle', 'getGaugePosition', 'Gauge', 'Tag', 'RetailerLocation'].includes(name));
   assert.deepEqual([...local.keys()], []);
   assert.deepEqual([...collectNamedNodes(directorySource, (name) => name === 'RetailerLocation').keys()], []);
