@@ -16,7 +16,10 @@ traverse(editorAst,{FunctionDeclaration(p){editorNodes[p.node.id.name]=p.node;}}
 const directorySource=readRepositoryFile('js/components/retailer-directory.mjs');
 const directoryAst=parser.parse(directorySource,{sourceType:'module'}),directoryNodes={};
 traverse(directoryAst,{FunctionDeclaration(p){directoryNodes[p.node.id.name]=p.node;}});
-const text=name=>{const node=editorNodes[name]||directoryNodes[name]||nodes[name],value=editorNodes[name]?editorSource:directoryNodes[name]?directorySource:source;return value.slice(node.start,node.end);};
+const historySource=readRepositoryFile('js/components/order-history.mjs');
+const historyAst=parser.parse(historySource,{sourceType:'module'}),historyNodes={};
+traverse(historyAst,{FunctionDeclaration(p){historyNodes[p.node.id.name]=p.node;},VariableDeclarator(p){historyNodes[p.node.id.name]=p.node.init;}});
+const text=name=>{const node=editorNodes[name]||directoryNodes[name]||historyNodes[name]||nodes[name],value=editorNodes[name]?editorSource:directoryNodes[name]?directorySource:historyNodes[name]?historySource:source;return value.slice(node.start,node.end);};
 const form={...Object.fromEntries(Object.keys(client.RETAILER_FIELDS).map(key=>[key,''])),name:'  Harbor Shop  ',active:true};
 test('directory cards render normalized location only when available',()=>{
  const ui=loadClient({React:{createElement:(tag,props,child)=>({tag,props,child})}});

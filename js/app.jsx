@@ -9,7 +9,7 @@ import { nonnegativeMoney, isReadableSavedOrder, buildSavedOrder, buildReorderPl
 import { newSizeRow, SEED_CIGARS, EMPTY_FORM, PACK_OPTIONS } from "./js/domain/catalog-data.mjs";
 import { db, auth } from "./js/services/firebase.mjs";
 import { subscribeCatalog, isLegacyCatalogMigrationAvailable, saveCatalogRecord, deleteCatalogRecord, readLegacyCatalog } from "./js/services/catalog-service.mjs";
-import { savePendingOrder, subscribeOrderHistory } from "./js/services/order-service.mjs";
+import { savePendingOrder } from "./js/services/order-service.mjs";
 import { subscribeAssignmentProfiles, subscribeRetailerDirectory } from "./js/services/retailer-service.mjs";
 import { saveAuthorizationProfile as saveAuthorizationProfileService } from "./js/services/profile-service.mjs";
 import { signInWithEmail, signOutUser, subscribeAuthState } from "./js/services/auth-service.mjs";
@@ -19,6 +19,7 @@ import { RetailerDirectory } from "./js/components/retailer-directory.mjs";
 import { ComparisonView } from "./js/components/comparison-view.mjs";
 import { CatalogList } from "./js/components/catalog-list.mjs";
 import { CigarDetail } from "./js/components/cigar-detail.mjs";
+import { OrderHistory } from "./js/components/order-history.mjs";
 
 // Application authorization only. Firestore Security Rules remain the enforcement boundary.
 
@@ -146,98 +147,6 @@ function SaveOrderPanel({ draft, user, profile, cigars, packOptions, requirePerm
       <button className="hg-btn" onClick={() => finish(false)} style={userButtonStyle}>Continue Editing Current Order</button>
       <button className="hg-btn" onClick={() => finish(true)} style={userButtonStyle}>Start New Order (clear current draft)</button>
     </div>}
-  </div>;
-}
-
-function OrderHistory({ user, profile, cigars, packOptions, draft, requirePermission, onApplyReorder, onClose, retailerFilter = null, onOpenRetailer }) {
-  const [orders, setOrders] = useState([]);
-  const [ready, setReady] = useState(false);
-  const [historyError, setHistoryError] = useState("");
-  const [search, setSearch] = useState("");
-  const [selectedOrderId, setSelectedOrderId] = useState(null);
-  const [review, setReview] = useState(false);
-  const [acknowledged, setAcknowledged] = useState(false);
-  const [retry, setRetry] = useState(0);
-  const allOrders = getProfilePermissions(profile).canManageUsers;
-  useEffect(() => {
-    if (!requirePermission("canUseOrderBuilder")) return;
-    let active = true;
-    setOrders([]); setReady(false); setSelectedOrderId(null); setReview(false); setHistoryError("");
-    const stop = subscribeOrderHistory({ allOrders, uid: user.uid }, (readable, malformedCount) => {
-      if (!active) return;
-      setOrders(readable);
-      setHistoryError(malformedCount ? "Some saved records contain malformed data and cannot be displayed. The stored records have not been changed." : "");
-      setReady(true);
-    }, (e) => {
-      if (!active) return;
-      setOrders([]); setSelectedOrderId(null); setReview(false); setReady(true);
-      setHistoryError(`Could not load order history: ${e.message}`);
-    });
-    return () => { active = false; stop(); };
-  }, [user.uid, allOrders, retry, requirePermission]);
-  const selected = orders.find((order) => order.id === selectedOrderId);
-  const filtered = orders.filter((order) => (!retailerFilter || order.retailerId === retailerFilter) && (order.retailerNameNormalized || normalizeRetailerName(order.retailerName || "")).includes(normalizeRetailerName(search)));
-  const plan = selected ? buildReorderPlan(selected, cigars, packOptions, draft.orderItems) : { available: [], unavailable: [] };
-  const planSignature = JSON.stringify(plan);
-  useEffect(() => { setAcknowledged(false); }, [planSignature]);
-  const hasDraft = draft.orderItems.length > 0 || [draft.orderRetailer, draft.orderEmail, draft.orderNotes].some((value) => value.trim());
-  const apply = (mode) => {
-    if (!requirePermission("canUseOrderBuilder") || !selected) return;
-    if (!plan.available.length || (plan.unavailable.length && !acknowledged)) { setHistoryError("Review and acknowledge unavailable items before continuing."); return; }
-    try { onApplyReorder(selected, plan, mode); } catch (e) { setHistoryError(e.message); }
-  };
-  return <div style={{ maxWidth: 1000, margin: "0 auto", padding: 24 }}>
-    <button className="hg-btn" style={userButtonStyle} onClick={selected ? () => { setSelectedOrderId(null); setReview(false); } : onClose}><ArrowLeft size={14} /> {selected ? "Back to History" : "Back to list"}</button>
-    <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 32, marginTop: 16 }}>Order History</div>
-    {historyError && <div role="alert" style={{ color: "#d98a7c", margin: "12px 0" }}>{historyError} <button className="hg-btn" style={userButtonStyle} onClick={() => setRetry((value) => value + 1)}>Reload history</button></div>}
-    {retailerFilter && <p>Showing exact retailer-linked orders you are permitted to read. Older unlinked orders are not included.</p>}
-    {!selected ? <>
-      <input aria-label="Search retailer history" placeholder="Search retailer name…" value={search} onChange={(e) => setSearch(e.target.value)} style={{ ...userFieldStyle, margin: "12px 0" }} />
-      {!ready ? <p>Loading saved orders…</p> : !orders.length ? <p>No saved orders yet.</p> : !filtered.length ? <p>No orders match this retailer search.</p> : <>
-        <p style={{ color: "#8A93A0", fontSize: 13 }}>{filtered.length} saved orders · Most recent: {savedOrderDate(filtered[0].savedAt)}</p>
-        {filtered.map((order) => <button key={order.id} className="hg-btn" onClick={() => { if (requirePermission("canUseOrderBuilder")) setSelectedOrderId(order.id); }} style={{ ...userButtonStyle, width: "100%", textAlign: "left", display: "block", marginBottom: 10, padding: 16 }}>
-          <strong>{order.retailerName || "Retailer not recorded"}</strong> · {orderMoney(order.totals?.wholesaleTotal)}
-          <div style={{ marginTop: 6, color: "#8A93A0" }}>{savedOrderDate(order.savedAt)} · {order.totals?.totalQuantity ?? "—"} total quantity · {order.lineItems?.length ?? "—"} lines{order.creatorDisplayName ? ` · ${order.creatorDisplayName}` : ""}</div>
-        </button>)}
-      </>}
-    </> : <>
-      <h2 style={{ fontFamily: "'Oswald', sans-serif" }}>{selected.retailerName || "Retailer not recorded"}</h2>
-      {validRetailerId(selected.retailerId) && onOpenRetailer && <button className="hg-btn" style={userButtonStyle} onClick={() => onOpenRetailer(selected.retailerId)}>Open Retailer Profile</button>}
-      <p>{savedOrderDate(selected.savedAt)}{selected.creatorDisplayName ? ` · ${selected.creatorDisplayName}` : ""}</p>
-      <p style={{ color: "#8A93A0", overflowWrap: "anywhere" }}>Order {selected.id}</p>
-      {selected.retailerEmail && <p>{selected.retailerEmail}</p>}
-      {selected.notes && <p style={{ whiteSpace: "pre-wrap" }}>{selected.notes}</p>}
-      {(selected.lineItems || []).map((line, index) => <div key={index} style={{ border: "1px solid #3B2A1E", borderRadius: 6, padding: 14, marginBottom: 10 }}>
-        <strong>{line.cigarName || "Product not recorded"}</strong> · {line.vitola} {line.dims} · {line.packLabel}
-        <div style={{ marginTop: 8 }}>{line.qty} × {orderMoney(line.unitPrice)} · Historical line total: {orderMoney(line.wholesaleTotal)}</div>
-      </div>)}
-      <p>Historical order total: <strong>{orderMoney(selected.totals?.wholesaleTotal)}</strong></p>
-      <p style={{ color: "#8A93A0" }}>Retail value: {orderMoney(selected.totals?.retailTotal)} · Gross profit: {orderMoney(selected.totals?.grossProfit)} · Margin: {Number.isFinite(selected.totals?.marginPct) ? `${selected.totals.marginPct.toFixed(1)}%` : "Not recorded"}</p>
-      <button className="hg-btn" style={userButtonStyle} onClick={() => { if (requirePermission("canUseOrderBuilder")) { setReview(true); setAcknowledged(false); } }}>Start New Order From This</button>
-      {review && <div role="dialog" aria-modal="true" aria-label="Review reorder" style={{ position: "fixed", inset: 0, zIndex: 65, background: "rgba(0,0,0,0.65)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
-        <div className="hg-scroll" style={{ background: "#1c1f24", border: "1px solid #B8894C", borderRadius: 8, padding: 20, width: "100%", maxWidth: 640, maxHeight: "85vh", overflowY: "auto" }}>
-          <h2 style={{ fontFamily: "'Bebas Neue', sans-serif" }}>Review Reorder</h2>
-          {historyError && <p role="alert" style={{ color: "#d98a7c" }}>{historyError}</p>}
-          <p>New order items use current prices. The historical order remains unchanged.</p>
-          {plan.available.map(({ line, historicalPrice, activePrice }, index) => <div key={index} style={{ borderBottom: "1px solid #454b53", padding: "10px 0" }}>
-            {line.cigarName} · {line.vitola} · {line.packLabel} × {line.qty}
-            <div>Historical: {orderMoney(historicalPrice)} → Current: {orderMoney(line.unitPrice)}</div>
-            {activePrice !== undefined && <div style={{ color: "#B8894C" }}>Matching active line: {orderMoney(activePrice)} → {orderMoney(line.unitPrice)}. Add mode combines quantities and reprices the combined line.</div>}
-          </div>)}
-          {plan.unavailable.length > 0 && <div style={{ color: "#d98a7c", marginTop: 14 }}>
-            {plan.unavailable.map((line, index) => <p key={index}>{line.cigarName} · {line.vitola} · {line.packLabel}: {line.reason}</p>)}
-            <label><input type="checkbox" checked={acknowledged} onChange={(e) => setAcknowledged(e.target.checked)} /> I understand these items will not be added.</label>
-          </div>}
-          {hasDraft && <p>Replace copies the saved retailer, email, notes and available items into your draft. Add keeps your current retailer, email and notes; only matching lines are repriced. Unrelated lines stay unchanged.</p>}
-          {!plan.available.length && <p>No configurations are currently available to reorder.</p>}
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 16 }}>
-            <button className="hg-btn" style={userButtonStyle} disabled={!plan.available.length || (plan.unavailable.length > 0 && !acknowledged)} onClick={() => apply("replace")}>{hasDraft ? "Replace Current Order" : "Create Active Order"}</button>
-            {hasDraft && <button className="hg-btn" style={userButtonStyle} disabled={!plan.available.length || (plan.unavailable.length > 0 && !acknowledged)} onClick={() => apply("add")}>Add Items to Current Order</button>}
-            <button className="hg-btn" style={userButtonStyle} onClick={() => setReview(false)}>Cancel</button>
-          </div>
-        </div>
-      </div>}
-    </>}
   </div>;
 }
 

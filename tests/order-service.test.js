@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { collectNamedNodes, extractInlineModule, importNativeModule, parseModule } = require('./test-support.cjs');
+const { collectNamedNodes, extractInlineModule, importNativeModule, parseModule, readRepositoryFile } = require('./test-support.cjs');
 
 const profile = { active: true, role: 'field_rep', displayName: 'Rep' };
 const packs = [{ key: 'box10', label: '10ct Box' }];
@@ -169,7 +169,11 @@ test('index imports order service without duplicate service declarations', () =>
   const ast = parseModule(source);
   const serviceImport = ast.program.body.find((node) => node.type === 'ImportDeclaration' && node.source.value === './js/services/order-service.mjs');
   assert(serviceImport, 'order service import');
-  assert.deepEqual(serviceImport.specifiers.map((node) => node.imported.name), ['savePendingOrder', 'subscribeOrderHistory']);
+  assert.deepEqual(serviceImport.specifiers.map((node) => node.imported.name), ['savePendingOrder']);
+  const historySource = readRepositoryFile('js/components/order-history.mjs');
+  const historyImport = parseModule(historySource).program.body.find((node) => node.type === 'ImportDeclaration' && node.source.value === '../services/order-service.mjs');
+  assert.deepEqual(historyImport.specifiers.map((node) => node.imported.name), ['subscribeOrderHistory']);
   const localNodes = collectNamedNodes(source, (name) => ['savePendingOrder', 'subscribeOrderHistory'].includes(name));
   assert.deepEqual([...localNodes.keys()], []);
+  assert.deepEqual([...collectNamedNodes(historySource, (name) => ['savePendingOrder', 'subscribeOrderHistory'].includes(name)).keys()], []);
 });

@@ -1,11 +1,13 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { collectNamedNodes, extractInlineModule, importNativeModule, nodeText } = require('./test-support.cjs');
+const { collectNamedNodes, extractInlineModule, importNativeModule, nodeText, parseModule, readRepositoryFile } = require('./test-support.cjs');
 
 const source = extractInlineModule();
-const nodes = collectNamedNodes(source, (name) => ['OrderHistory', 'HazeGrayReference'].includes(name));
-const history = nodeText(source, nodes, 'OrderHistory');
+const nodes = collectNamedNodes(source, (name) => name === 'HazeGrayReference');
 const root = nodeText(source, nodes, 'HazeGrayReference');
+const historySource = readRepositoryFile('js/components/order-history.mjs');
+const historyNodes = collectNamedNodes(historySource, (name) => name === 'OrderHistory');
+const history = nodeText(historySource, historyNodes, 'OrderHistory');
 
 test('Order History keeps its account, role and retailer-scope remount boundary with fresh local state', () => {
   assert.match(root, /<OrderHistory[\s\S]*?key=\{`\$\{user\.uid\}:\$\{userProfile\.role\}:\$\{historyRetailerId \|\| "all"\}`\}/);
@@ -26,7 +28,7 @@ test('Order History preserves manager/creator subscription scope, cleanup and la
   assert.match(history, /subscribeOrderHistory\(\{ allOrders, uid: user\.uid \}, \(readable, malformedCount\) => \{/);
   assert.equal((history.match(/if \(!active\) return;/g) || []).length, 2, 'both success and error callbacks stay guarded');
   assert.match(history, /setHistoryError\(malformedCount \? "Some saved records contain malformed data and cannot be displayed\. The stored records have not been changed\." : ""\)/);
-  assert.match(history, /setHistoryError\(`Could not load order history: \$\{e\.message\}`\)/);
+  assert.match(history, /setHistoryError\(`Could not load order history: \$\{error\.message\}`\)/);
   assert.match(history, /return \(\) => \{ active = false; stop\(\); \}/);
   assert.match(history, /\[user\.uid, allOrders, retry, requirePermission\]/);
 });
@@ -36,11 +38,11 @@ test('Order History selection follows live snapshots and preserves close/reset b
   const orders = [{ id: 'order-a' }];
   assert.equal(orders.find((order) => order.id === 'order-a')?.id, 'order-a');
   assert.equal([].find((order) => order.id === 'order-a'), undefined, 'a vanished order no longer renders as selected');
-  assert.match(history, /!selected \? <>[\s\S]*?: <>[\s\S]*?<h2/);
-  assert.match(history, /onClick=\{selected \? \(\) => \{ setSelectedOrderId\(null\); setReview\(false\); \} : onClose\}/);
+  assert.match(history, /const selectedOrder = selected && h\(React\.Fragment/);
+  assert.match(history, /onClick: selected \? \(\) => \{ setSelectedOrderId\(null\); setReview\(false\); \} : onClose/);
   assert.match(history, /setOrders\(\[\]\); setSelectedOrderId\(null\); setReview\(false\); setReady\(true\)/);
   assert.match(history, /setSelectedOrderId\(order\.id\)/);
-  assert.match(history, /onClick=\{\(\) => setReview\(false\)\}>Cancel/);
+  assert.match(history, /onClick: \(\) => setReview\(false\) \}, "Cancel"/);
 });
 
 test('Order History preserves retailer/search filtering and linked-retailer navigation', async () => {
@@ -78,17 +80,27 @@ test('reorder review preserves current-price planning, unavailable acknowledgeme
   assert.match(history, /useEffect\(\(\) => \{ setAcknowledged\(false\); \}, \[planSignature\]\)/);
   assert.match(history, /!plan\.available\.length \|\| \(plan\.unavailable\.length && !acknowledged\)/);
   assert.match(history, /I understand these items will not be added\./);
-  assert.match(history, /disabled=\{!plan\.available\.length \|\| \(plan\.unavailable\.length > 0 && !acknowledged\)\}/);
+  assert.match(history, /disabled: !plan\.available\.length \|\| \(plan\.unavailable\.length > 0 && !acknowledged\)/);
 });
 
 test('reorder Add and Replace retain their reviewed-plan and draft callback contracts', () => {
   assert.match(history, /onApplyReorder\(selected, plan, mode\)/);
-  assert.match(history, /onClick=\{\(\) => apply\("replace"\)\}/);
-  assert.match(history, /onClick=\{\(\) => apply\("add"\)\}/);
+  assert.match(history, /onClick: \(\) => apply\("replace"\)/);
+  assert.match(history, /onClick: \(\) => apply\("add"\)/);
   assert.match(root, /const applyReorder = \(order, reviewedPlan, mode\) => \{/);
   assert.match(root, /const currentPlan = buildReorderPlan\(order, cigars, PACK_OPTIONS, orderItems\)/);
   assert.match(root, /JSON\.stringify\(currentPlan\) !== JSON\.stringify\(reviewedPlan\)/);
   assert.match(root, /mergeReorderItems\(mode === "add" \? orderItems : \[\], currentPlan\.available\.map\(\(item\) => item\.line\)\)/);
   assert.match(root, /if \(mode === "replace"\) \{ setRetailerId\([\s\S]*?setOrderRetailer\([\s\S]*?setOrderEmail\([\s\S]*?setOrderNotes\(/);
   assert.match(root, /if \(access\.uid !== user\.uid \|\| \(!access\.permissions\.canManageUsers && order\.creatorUid !== access\.uid\)\)/);
+});
+
+test('app imports the extracted Order History without a duplicate implementation', () => {
+  const imports = parseModule(source).program.body.filter((node) => node.type === 'ImportDeclaration');
+  const historyImport = imports.find((node) => node.source.value === './js/components/order-history.mjs');
+  assert.deepEqual(historyImport.specifiers.map((node) => node.imported.name), ['OrderHistory']);
+  assert.deepEqual([...collectNamedNodes(source, (name) => name === 'OrderHistory').keys()], []);
+  assert.deepEqual([...historyNodes.keys()], ['OrderHistory']);
+  assert.match(historySource, /export function OrderHistory/);
+  assert.doesNotMatch(root, /subscribeOrderHistory|Some saved records contain malformed data|Review Reorder/);
 });
