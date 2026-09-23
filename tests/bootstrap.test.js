@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { readIndexHtml, readApplicationModule, parseModule, importNativeModule, traverse } = require('./test-support.cjs');
+const { readIndexHtml, readApplicationModule, readRepositoryFile, parseModule, importNativeModule, traverse } = require('./test-support.cjs');
 
 test('index.html remains the application entry point with its React root and mount', () => {
   const html = readIndexHtml();
@@ -35,7 +35,7 @@ test('index.html remains the application entry point with its React root and mou
   assert(imports.some((node) => node.source.value === './js/components/catalog-list.mjs'));
   assert(imports.some((node) => node.source.value === './js/components/cigar-detail.mjs'));
   assert(imports.some((node) => node.source.value === './js/components/order-history.mjs'));
-  assert(imports.some((node) => node.source.value === './js/components/save-order-panel.mjs'));
+  assert(imports.some((node) => node.source.value === './js/components/final-review.mjs'));
 
   let rootLookup = false, appMount = false;
   traverse(ast, {
@@ -68,9 +68,9 @@ test('external app entry retains lifecycle guards and key-based remount boundari
     'key={`${user.uid}:${userProfile.role}`}',
     'key={`${user.uid}:${userProfile.role}:${historyRetailerId || "all"}`}',
     'key={user.uid}',
-    'key={`${user.uid}:${userProfile.role}`} draft={activeDraft}',
     'key={selected.id} cigar={selected}'
   ]) assert(source.includes(expected), expected);
+  assert(readRepositoryFile('js/components/final-review.mjs').includes('key: `${user.uid}:${userProfile.role}`'));
 });
 
 test('test support can directly import future native domain modules', async () => {

@@ -19,7 +19,7 @@ import { ComparisonView } from "./js/components/comparison-view.mjs";
 import { CatalogList } from "./js/components/catalog-list.mjs";
 import { CigarDetail } from "./js/components/cigar-detail.mjs";
 import { OrderHistory } from "./js/components/order-history.mjs";
-import { SaveOrderPanel } from "./js/components/save-order-panel.mjs";
+import { FinalReview } from "./js/components/final-review.mjs";
 
 // Application authorization only. Firestore Security Rules remain the enforcement boundary.
 
@@ -463,6 +463,66 @@ const orderMarginPct =
     } catch (e) {
       // no-op
     }
+  };
+  const emailFinalOrder = () => {
+    if (!requirePermission("canUseFinalReview")) return;
+    const retailerName = orderRetailer.trim();
+    const retailerEmail = orderEmail.trim();
+    const orderLines = orderItems.map((line, index) => {
+      const lineTotal = line.unitPrice * line.qty;
+      const size = `${line.vitola}${line.dims ? ` (${line.dims})` : ""}`;
+      return [
+        `${index + 1}. ${line.cigarName}`,
+        `   ${size}`,
+        `   Package: ${line.packLabel}`,
+        `   Quantity: ${line.qty}`,
+        `   Line Total: $${lineTotal.toFixed(2)}`
+      ].join("\n");
+    });
+    const body = [
+      "HAZE GRAY CIGARS — FINAL ORDER",
+      "",
+      retailerName ? `Retailer: ${retailerName}` : "",
+      retailerEmail ? `Contact: ${retailerEmail}` : "",
+      "",
+      ...orderLines.flatMap((line) => [line, ""]),
+      "----------------------------------------",
+      `ORDER TOTAL: $${orderWholesaleTotal.toFixed(2)}`,
+      "",
+      orderNotes ? `Notes: ${orderNotes}` : ""
+    ].join("\n");
+    const subject = retailerName ? `Haze Gray Cigars Order — ${retailerName}` : "Haze Gray Cigars Order";
+    const mailto = `mailto:${encodeURIComponent(retailerEmail)}` + `?subject=${encodeURIComponent(subject)}` + `&body=${encodeURIComponent(body)}`;
+    window.location.href = mailto;
+  };
+  const copyFinalOrder = async () => {
+    if (!requirePermission("canUseFinalReview")) return;
+    const orderLines = orderItems.map((line, index) => {
+      const lineTotal = line.unitPrice * line.qty;
+      const size = `${line.vitola}${line.dims ? ` (${line.dims})` : ""}`;
+      return [
+        `${index + 1}. ${line.cigarName}`,
+        `   ${size}`,
+        `   Package: ${line.packLabel}`,
+        `   Quantity: ${line.qty}`,
+        `   Line Total: $${lineTotal.toFixed(2)}`
+      ].join("\n");
+    });
+    const text = [
+      "HAZE GRAY CIGARS — FINAL ORDER",
+      "",
+      orderRetailer ? `Retailer: ${orderRetailer}` : "",
+      orderEmail ? `Contact: ${orderEmail}` : "",
+      "",
+      ...orderLines.flatMap((line) => [line, ""]),
+      "----------------------------------------",
+      `ORDER TOTAL: $${orderWholesaleTotal.toFixed(2)}`,
+      "",
+      orderNotes ? `Notes: ${orderNotes}` : ""
+    ].join("\n");
+    await navigator.clipboard.writeText(text);
+    setCopyConfirmed(true);
+    setTimeout(() => setCopyConfirmed(false), 2000);
   };
 const openOrderFromCompare = (cigarId) => {
   if (!requirePermission("canUseOrderBuilder")) return;
@@ -1011,387 +1071,8 @@ const openOrderFromCompare = (cigarId) => {
         <AuthorizedUsers key={user.uid} currentUid={user.uid} managerProfile={userProfile} requirePermission={requirePermission} onSave={saveAuthorizationProfile} onClose={() => { setShowAuthorizedUsers(false); setShowCompare(false); setSelectedId(null); }} />
       ) : loading ? (
         <div style={{ padding: 40, fontFamily: "'Oswald', sans-serif", color: "#8A93A0" }}>Loading manifest…</div>
-    ) : showFinalReview && canUseFinalReview ? (
-  // ---------- FINAL REVIEW ----------
-  <div style={{ maxWidth: 900, margin: "0 auto", padding: "24px" }}>
-
-    <button
-      className="hg-btn"
-      onClick={() => setShowFinalReview(false)}
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 6,
-        background: "none",
-        border: "none",
-        color: "#B8894C",
-        fontFamily: "'Oswald', sans-serif",
-        fontSize: 13,
-        letterSpacing: 1,
-        textTransform: "uppercase",
-        padding: "6px 0",
-        marginBottom: 18
-      }}
-    >
-      <ArrowLeft size={16} /> Back to Order Builder
-    </button>
-
-    <div
-      style={{
-        fontFamily: "'Bebas Neue', sans-serif",
-        fontSize: 32,
-        letterSpacing: 1,
-        marginBottom: 6
-      }}
-    >
-      Final Review
-    </div>
-
-    <div
-      style={{
-        fontFamily: "'Oswald', sans-serif",
-        color: "#8A93A0",
-        fontSize: 13,
-        letterSpacing: 1,
-        marginBottom: 24
-      }}
-    >
-      REVIEW ORDER BEFORE SUBMISSION
-    </div>
-{/* Retailer Information */}
-<div
-  style={{
-    border: "1px solid #2C3036",
-    borderRadius: 8,
-    padding: "16px 18px",
-    marginBottom: 20
-  }}
->
-  <div
-    style={{
-      display: "grid",
-      gridTemplateColumns: "1fr 1fr",
-      gap: 20
-    }}
-  >
-    <div>
-      <div style={{
-        fontFamily: "'Oswald', sans-serif",
-        fontSize: 11,
-        letterSpacing: 1.5,
-        color: "#8A93A0",
-        textTransform: "uppercase",
-        marginBottom: 4
-      }}>
-        Retailer
-      </div>
-      <div style={{
-        fontFamily: "'Oswald', sans-serif",
-        fontSize: 17,
-        color: "#EDE6D6"
-      }}>
-        {orderRetailer || "—"}
-      </div>
-    </div>
-
-    <div>
-      <div style={{
-        fontFamily: "'Oswald', sans-serif",
-        fontSize: 11,
-        letterSpacing: 1.5,
-        color: "#8A93A0",
-        textTransform: "uppercase",
-        marginBottom: 4
-      }}>
-        Contact Email
-      </div>
-      <div style={{
-        fontFamily: "'Oswald', sans-serif",
-        fontSize: 17,
-        color: "#EDE6D6"
-      }}>
-        {orderEmail || "—"}
-      </div>
-    </div>
-  </div>
-</div>
-
-{/* Final Order */}
-<div style={{
-  border: "1px solid #2C3036",
-  borderRadius: 8,
-  overflow: "hidden",
-  marginBottom: 20
-}}>
-  <div style={{
-    display: "grid",
-    gridTemplateColumns: "2fr 1.2fr 1.2fr .6fr 1fr",
-    gap: 12,
-    padding: "12px 16px",
-    background: "#1B1E22",
-    borderBottom: "1px solid #2C3036",
-    fontFamily: "'Oswald', sans-serif",
-    fontSize: 11,
-    letterSpacing: 1.5,
-    color: "#8A93A0",
-    textTransform: "uppercase"
-  }}>
-    <div>Cigar</div>
-    <div>Size</div>
-    <div>Package</div>
-    <div>Qty</div>
-    <div style={{ textAlign: "right" }}>Total</div>
-  </div>
-
-  {orderItems.map((li) => {
-    const lineTotal = li.unitPrice * li.qty;
-
-    return (
-      <div
-        key={li.lineKey}
-        style={{
-          display: "grid",
-          gridTemplateColumns: "2fr 1.2fr 1.2fr .6fr 1fr",
-          gap: 12,
-          padding: "14px 16px",
-          borderBottom: "1px solid #2C3036",
-          alignItems: "center"
-        }}
-      >
-        <div style={{
-          fontFamily: "'Oswald', sans-serif",
-          fontWeight: 600,
-          color: "#EDE6D6"
-        }}>
-          {li.cigarName}
-        </div>
-
-        <div style={{
-          fontFamily: "'Oswald', sans-serif",
-          color: "#C9CFD6"
-        }}>
-          {li.vitola} {li.dims ? `(${li.dims})` : ""}
-        </div>
-
-        <div style={{
-          fontFamily: "'Oswald', sans-serif",
-          color: "#C9CFD6"
-        }}>
-          {li.packLabel}
-        </div>
-
-        <div style={{
-          fontFamily: "'JetBrains Mono', monospace",
-          color: "#EDE6D6"
-        }}>
-          {li.qty}
-        </div>
-
-        <div style={{
-          fontFamily: "'JetBrains Mono', monospace",
-          color: "#EDE6D6",
-          textAlign: "right"
-        }}>
-          ${lineTotal.toFixed(2)}
-        </div>
-      </div>
-    );
-  })}
-
-  <div style={{
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    padding: "16px",
-    background: "rgba(184,137,76,0.08)"
-  }}>
-    <div style={{
-      fontFamily: "'Oswald', sans-serif",
-      fontSize: 13,
-      fontWeight: 600,
-      letterSpacing: 1.5,
-      color: "#B8894C",
-      textTransform: "uppercase"
-    }}>
-      Order Total
-    </div>
-
-    <div style={{
-      fontFamily: "'JetBrains Mono', monospace",
-      fontSize: 22,
-      color: "#EDE6D6"
-    }}>
-      ${orderWholesaleTotal.toFixed(2)}
-    </div>
-  </div>
-</div>
-
-{orderNotes && (
-  <div style={{
-    border: "1px solid #2C3036",
-    borderRadius: 8,
-    padding: "16px 18px",
-    marginBottom: 20
-  }}>
-    <div style={{
-      fontFamily: "'Oswald', sans-serif",
-      fontSize: 11,
-      letterSpacing: 1.5,
-      color: "#8A93A0",
-      textTransform: "uppercase",
-      marginBottom: 6
-    }}>
-      Notes
-    </div>
-
-    <div style={{
-      fontFamily: "'Lora', serif",
-      color: "#C9CFD6",
-      lineHeight: 1.6
-    }}>
-      {orderNotes}
-    </div>
-  </div>
-)}
-<SaveOrderPanel key={`${user.uid}:${userProfile.role}`} draft={activeDraft} user={user} profile={userProfile} cigars={cigars} packOptions={PACK_OPTIONS} requirePermission={requirePermission} onContinue={openOrderBuilder} onStartNew={() => { clearOrder(); openOrderBuilder(); }} />
-<div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-  <button
-    className="hg-btn"
-    onClick={() => {
-      if (!requirePermission("canUseFinalReview")) return;
-      const retailerName = orderRetailer.trim();
-      const retailerEmail = orderEmail.trim();
-
- const orderLines = orderItems.map((li, index) => {
-  const lineTotal = li.unitPrice * li.qty;
-  const size = `${li.vitola}${li.dims ? ` (${li.dims})` : ""}`;
-
- return [
-  `${index + 1}. ${li.cigarName}`,
-  `   ${size}`,
-  `   Package: ${li.packLabel}`,
-  `   Quantity: ${li.qty}`,
-  `   Line Total: $${lineTotal.toFixed(2)}`
-].join("\n");
-});
-
-const body = [
-  "HAZE GRAY CIGARS — FINAL ORDER",
-  "",
-  retailerName ? `Retailer: ${retailerName}` : "",
-  retailerEmail ? `Contact: ${retailerEmail}` : "",
-  "",
-  ...orderLines.flatMap((line) => [line, ""]),
-  "----------------------------------------",
-  `ORDER TOTAL: $${orderWholesaleTotal.toFixed(2)}`,
-  "",
-  orderNotes ? `Notes: ${orderNotes}` : ""
-].join("\n");
-
-      const subject = retailerName
-        ? `Haze Gray Cigars Order — ${retailerName}`
-        : "Haze Gray Cigars Order";
-
-      const mailto =
-        `mailto:${encodeURIComponent(retailerEmail)}` +
-        `?subject=${encodeURIComponent(subject)}` +
-        `&body=${encodeURIComponent(body)}`;
-
-      window.location.href = mailto;
-    }}
-    style={{
-      display: "flex",
-      alignItems: "center",
-      gap: 8,
-      background: "#B8894C",
-      border: "none",
-      color: "#14161A",
-      borderRadius: 4,
-      padding: "10px 18px",
-      fontFamily: "'Oswald', sans-serif",
-      fontWeight: 600,
-      fontSize: 13
-    }}
-  >
-    <Mail size={15} />
-    Email Order
-  </button>
-
-  <button
-    className="hg-btn"
-    onClick={async () => {
-      if (!requirePermission("canUseFinalReview")) return;
-      const orderLines = orderItems.map((li, index) => {
-  const lineTotal = li.unitPrice * li.qty;
-  const size = `${li.vitola}${li.dims ? ` (${li.dims})` : ""}`;
-
-  return [
-    `${index + 1}. ${li.cigarName}`,
-    `   ${size}`,
-    `   Package: ${li.packLabel}`,
-    `   Quantity: ${li.qty}`,
-    `   Line Total: $${lineTotal.toFixed(2)}`
-  ].join("\n");
-});
-
-const text = [
-  "HAZE GRAY CIGARS — FINAL ORDER",
-  "",
-  orderRetailer ? `Retailer: ${orderRetailer}` : "",
-  orderEmail ? `Contact: ${orderEmail}` : "",
-  "",
-  ...orderLines.flatMap((line) => [line, ""]),
-  "----------------------------------------",
-  `ORDER TOTAL: $${orderWholesaleTotal.toFixed(2)}`,
-  "",
-  orderNotes ? `Notes: ${orderNotes}` : ""
-].join("\n");
-
-      await navigator.clipboard.writeText(text);
-      setCopyConfirmed(true);
-      setTimeout(() => setCopyConfirmed(false), 2000);
-    }}
-    style={{
-      display: "flex",
-      alignItems: "center",
-      gap: 8,
-      background: "none",
-      border: "1px solid #6E7681",
-      color: "#C9CFD6",
-      borderRadius: 4,
-      padding: "10px 18px",
-      fontFamily: "'Oswald', sans-serif",
-      fontWeight: 500,
-      fontSize: 13
-    }}
-  >
-    <Copy size={15} />
-    {copyConfirmed ? "Copied!" : "Copy Order"}
-  </button>
-
-  <button
-    className="hg-btn"
-    onClick={() => setShowFinalReview(false)}
-    style={{
-      display: "flex",
-      alignItems: "center",
-      gap: 8,
-      background: "none",
-      border: "1px solid #6E7681",
-      color: "#C9CFD6",
-      borderRadius: 4,
-      padding: "10px 18px",
-      fontFamily: "'Oswald', sans-serif",
-      fontWeight: 500,
-      fontSize: 13
-    }}
-  >
-    <ArrowLeft size={15} />
-    Back to Builder
-  </button>
-</div>
-  </div>
-
+) : showFinalReview && canUseFinalReview ? (
+        <FinalReview draft={activeDraft} user={user} userProfile={userProfile} cigars={cigars} packOptions={PACK_OPTIONS} requirePermission={requirePermission} orderWholesaleTotal={orderWholesaleTotal} copyConfirmed={copyConfirmed} onBack={() => setShowFinalReview(false)} onContinue={openOrderBuilder} onStartNew={() => { clearOrder(); openOrderBuilder(); }} onEmail={emailFinalOrder} onCopy={copyFinalOrder} />
 ) : showOrderBuilder && canUseOrderBuilder ? (
   // ---------- ORDER BUILDER ----------
   <div style={{ maxWidth: 900, margin: "0 auto", padding: "24px" }}>
