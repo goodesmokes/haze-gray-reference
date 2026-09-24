@@ -4,10 +4,12 @@ const { collectNamedNodes, importNativeModule, parseModule, readApplicationModul
 
 const source = readApplicationModule();
 const ast = parseModule(source);
-const nodes = collectNamedNodes(source, (name) => ['HazeGrayReference', 'DetailOrderControls'].includes(name));
+const nodes = collectNamedNodes(source, (name) => name === 'HazeGrayReference');
 const rootNode = nodes.get('HazeGrayReference');
 const root = source.slice(rootNode.start, rootNode.end);
-const detailControls = source.slice(nodes.get('DetailOrderControls').start, nodes.get('DetailOrderControls').end);
+const detailControlsSource = readRepositoryFile('js/components/detail-order-controls.mjs');
+const detailControlsNodes = collectNamedNodes(detailControlsSource, (name) => name === 'DetailOrderControls');
+const detailControls = detailControlsSource.slice(detailControlsNodes.get('DetailOrderControls').start, detailControlsNodes.get('DetailOrderControls').end);
 const comparisonSource = readRepositoryFile('js/components/comparison-view.mjs');
 const comparisonNodes = collectNamedNodes(comparisonSource, (name) => name === 'ComparisonView');
 const comparison = comparisonSource.slice(comparisonNodes.get('ComparisonView').start, comparisonNodes.get('ComparisonView').end);
@@ -145,6 +147,32 @@ test('DetailOrderControls remains cigar-keyed and initializes fresh size, packag
   assert.match(detailControls, /setPackKey\(firstSize \? packagesFor\(firstSize\)\[0\]\.key : ""\)/);
   assert.match(detailControls, /setQuantity\("1"\)/);
   assert.match(detailControls, /onAdd\(cigar, size, pack\.key, qty\)/);
+});
+
+test('DetailOrderControls preserves package pricing, validation, notice and timeout behavior', () => {
+  assert.match(detailControls, /pack\.key === "single" \? getSinglePrice\(size, "box"\) : getNumericPrice\(size, pack\.key\)/);
+  assert.match(detailControls, /Number\.isFinite\(pack\.price\) && pack\.price >= 0/);
+  assert.match(detailControls, /disabled: !sizes\.length/);
+  assert.match(detailControls, /"aria-expanded": expanded/);
+  assert.match(detailControls, /type: "number", min: "1", step: "1", value: quantity/);
+  assert.match(detailControls, /Enter a whole-number quantity of 1 or more\./);
+  assert.match(detailControls, /Select an available size and package with an order price\./);
+  assert.match(detailControls, /This quantity is too large\. Enter a smaller quantity\./);
+  assert.match(detailControls, /setExpanded\(false\)[\s\S]*?setValidation\(""\)[\s\S]*?setNotice\(`/);
+  assert.match(detailControls, /const timer = setTimeout\(\(\) => setNotice\(""\), 4000\)/);
+  assert.match(detailControls, /return \(\) => clearTimeout\(timer\)/);
+  assert.match(detailControls, /role: "status", "aria-live": "polite"/);
+});
+
+test('app imports DetailOrderControls without retaining a duplicate implementation', () => {
+  const imports = ast.program.body.filter((node) => node.type === 'ImportDeclaration');
+  const detailControlsImport = imports.find((node) => node.source.value === './js/components/detail-order-controls.mjs');
+  assert.deepEqual(detailControlsImport.specifiers.map((node) => node.imported.name), ['DetailOrderControls']);
+  assert.deepEqual([...collectNamedNodes(source, (name) => name === 'DetailOrderControls').keys()], []);
+  assert.deepEqual([...detailControlsNodes.keys()], ['DetailOrderControls']);
+  assert.match(detailControlsSource, /export function DetailOrderControls/);
+  assert.equal((root.match(/<DetailOrderControls\b/g) || []).length, 1);
+  assert.doesNotMatch(root, /No sizes with available order pricing\.|Enter a whole-number quantity of 1 or more\./);
 });
 
 test('app imports the extracted cigar detail without retaining a duplicate implementation', () => {

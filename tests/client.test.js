@@ -9,7 +9,13 @@ const ast=babel.babelParse(source,'index.jsx',true),oldAst=babel.babelParse(orig
 function named(tree,name){let result;babel.traverse(tree,{FunctionDeclaration(p){if(p.node.id.name===name)result=p.node;},VariableDeclarator(p){if(p.node.id.name===name)result=p.node.init;}});assert(result,name);return result;}
 const text=name=>{const n=named(ast,name);return source.slice(n.start,n.end);};
 const clean=n=>JSON.parse(JSON.stringify(n,(key,value)=>['start','end','loc','extra','leadingComments','trailingComments','innerComments'].includes(key)?undefined:value));
-for(const name of ['addToOrder','DetailOrderControls','orderWholesaleTotal','orderRetailTotal','orderGrossProfit','orderMarginPct','buildOrderText','emailOrder','copyOrderText'])assert.deepEqual(clean(named(ast,name)),clean(named(oldAst,name)),name+' changed');
+for(const name of ['addToOrder','orderWholesaleTotal','orderRetailTotal','orderGrossProfit','orderMarginPct','buildOrderText','emailOrder','copyOrderText'])assert.deepEqual(clean(named(ast,name)),clean(named(oldAst,name)),name+' changed');
+const detailControlsSource=fs.readFileSync('js/components/detail-order-controls.mjs','utf8').replace(/\r\n/g,'\n');
+const detailControlsAst=babel.babelParse(detailControlsSource,'detail-order-controls.mjs',true);
+assert(named(detailControlsAst,'DetailOrderControls'),'extracted DetailOrderControls export');
+assert.throws(()=>named(ast,'DetailOrderControls'),/DetailOrderControls/,'DetailOrderControls must not remain declared in app.jsx');
+assert.match(source,/import \{ DetailOrderControls \} from "\.\/js\/components\/detail-order-controls\.mjs"/);
+assert.match(source,/<DetailOrderControls key=\{selected\.id\} cigar=\{selected\}/);
 const rules=fs.readFileSync('firestore.rules','utf8').replace(/\r\n/g,'\n');
 const oldRules=cp.execFileSync('git',['show','HEAD:firestore.rules'],{encoding:'utf8'}).replace(/\r\n/g,'\n');
 // Exclude only the new orders section on both sides, whether HEAD predates or includes it.
