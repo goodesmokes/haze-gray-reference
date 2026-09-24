@@ -14,7 +14,7 @@ const catalogSource = readRepositoryFile('js/domain/catalog-data.mjs');
 const catalogNodes = collectNamedNodes(catalogSource, (name) => ['newSizeRow', 'EMPTY_FORM'].includes(name));
 const newSizeRow = Function(`return ${nodeText(catalogSource, catalogNodes, 'newSizeRow')}`)();
 const EMPTY_FORM = Function('newSizeRow', `return ${nodeText(catalogSource, catalogNodes, 'EMPTY_FORM')}`)(newSizeRow);
-const editorMarkup = root.slice(root.indexOf('{/* ---------- ADD/EDIT FORM MODAL ---------- */}'), root.indexOf('{/* ---------- SIGN IN MODAL ---------- */}'));
+const editorMarkup = readRepositoryFile('js/components/catalog-editor.mjs');
 
 test('Catalog Editor add and edit entry points reset from defaults or the selected cigar', () => {
   let form;
@@ -174,20 +174,21 @@ test('browser image compression and editor upload handling preserve success and 
   await failed({ type: 'image/jpeg' });
   assert.equal(uploadError, "Couldn't process that photo — try a different file.");
   assert.equal(uploading, false);
-  assert.match(root, /ref=\{fileInputRef\}[\s\S]*?accept="image\/\*"[\s\S]*?handlePhotoFile\(e\.target\.files && e\.target\.files\[0\]\)/);
-  assert.match(root, /fileInputRef\.current && fileInputRef\.current\.click\(\)/);
-  assert.match(root, /form\.imageUrl \? "Replace photo" : "Upload photo"/);
-  assert.match(root, /setForm\(\(f\) => \(\{ \.\.\.f, imageUrl: "" \}\)\)/);
+  assert.match(editorMarkup, /ref: fileInputRef[\s\S]*?accept: "image\/\*"[\s\S]*?onPhotoFile\(event\.target\.files && event\.target\.files\[0\]\)/);
+  assert.match(editorMarkup, /fileInputRef\.current && fileInputRef\.current\.click\(\)/);
+  assert.match(editorMarkup, /form\.imageUrl \? "Replace photo" : "Upload photo"/);
+  assert.match(editorMarkup, /onFormChange\(\(current\) => \(\{ \.\.\.current, imageUrl: "" \}\)\)/);
 });
 
 test('Catalog Editor modal, permission-loss and delete behavior remain wired at the root', () => {
   assert.match(root, /formOpen && canEditCatalog && canEditPackages/);
-  assert.match(root, /position: "fixed"[\s\S]*?onClick=\{\(\) => setFormOpen\(false\)\}>[\s\S]*?<div onClick=\{\(e\) => e\.stopPropagation\(\)\} className="hg-scroll"/);
-  assert.equal((root.match(/onClick=\{\(\) => setFormOpen\(false\)\}/g) || []).length >= 3, true, 'overlay, close, and Cancel all close the modal');
+  assert.match(root, /<CatalogEditor[\s\S]*?onClose=\{\(\) => setFormOpen\(false\)\}/);
+  assert.match(editorMarkup, /position: "fixed"[\s\S]*?onClick: onClose[\s\S]*?onClick: \(event\) => event\.stopPropagation\(\)[\s\S]*?className: "hg-scroll"/);
+  assert.equal((editorMarkup.match(/onClick: onClose/g) || []).length, 3, 'overlay, close, and Cancel all close the modal');
   assert.match(root, /if \(!canEditCatalog\) \{ setFormOpen\(false\); setConfirmDeleteId\(null\); \}/);
   assert.match(root, /\{formOpen && canEditCatalog && canEditPackages && \(/);
-  assert.match(root, /onClick=\{saveForm\}[\s\S]*?\{editingId \? "Save Changes" : "Add Cigar"\}/);
-  assert.doesNotMatch(root, /savingCatalog|disabled=\{[^}]*saving/, 'the current editor has no separate busy state');
+  assert.match(editorMarkup, /onClick: onSave[\s\S]*?editingId \? "Save Changes" : "Add Cigar"/);
+  assert.doesNotMatch(editorMarkup, /savingCatalog|disabled:/, 'the current editor has no separate busy state');
   assert.match(root, /confirmDeleteId && canEditCatalog/);
   assert.match(root, /onClick=\{\(\) => doDelete\(confirmDeleteId\)\}/);
   assert.match(text('doDelete'), /requirePermission\("canEditCatalog"\)[\s\S]*?deleteCigarDoc\(id\)[\s\S]*?setConfirmDeleteId\(null\)[\s\S]*?if \(selectedId === id\) setSelectedId\(null\)/);
@@ -201,4 +202,21 @@ test('Catalog Editor keeps policy in root permission callbacks and image process
   assert.doesNotMatch(editorMarkup, /ROLE_PERMISSIONS|ROLE_LABELS|getProfilePermissions/, 'the editor markup does not duplicate role policy');
   assert.match(text('handlePhotoFile'), /fileToCompressedDataUrl\(file\)/);
   assert.doesNotMatch(text('saveCigarDoc'), /FileReader|Image|canvas|fileToCompressedDataUrl/);
+});
+
+test('Catalog Editor is extracted without moving root-owned editor state or duplicating production markup', () => {
+  assert.match(source, /import \{ CatalogEditor \} from "\.\/js\/components\/catalog-editor\.mjs"/);
+  assert.match(editorMarkup, /export function CatalogEditor\(/);
+  assert.equal((source.match(/<CatalogEditor\b/g) || []).length, 1);
+  assert.doesNotMatch(source, /function CatalogEditor\s*\(/);
+  assert.doesNotMatch(source, /Select Existing Retailer or Manual Entry[\s\S]*?Sizes & Pricing/);
+  for (const initializer of [
+    'const [formOpen, setFormOpen] = useState(false)',
+    'const [editingId, setEditingId] = useState(null)',
+    'const [form, setForm] = useState(EMPTY_FORM)',
+    'const [uploading, setUploading] = useState(false)',
+    'const [uploadError, setUploadError] = useState("")',
+    'const fileInputRef = useRef(null)'
+  ]) assert(root.includes(initializer), initializer);
+  assert.match(root, /<CatalogEditor form=\{form\} editingId=\{editingId\}[\s\S]*?onSave=\{saveForm\}/);
 });
