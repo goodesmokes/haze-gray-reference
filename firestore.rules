@@ -43,6 +43,13 @@ function isManager() {
 // CIGAR CATALOG
 // -------------------------------
 
+// Keep this path contract aligned with js/domain/catalog-images.mjs.
+function validCatalogImage(data) {
+  return !('imageUrl' in data) || (data.imageUrl is string
+    && (data.imageUrl == '' || (data.imageUrl.size() <= 240
+      && data.imageUrl.matches('/haze-gray-reference/assets/cigars/[A-Za-z0-9][A-Za-z0-9_-]*[.]webp'))));
+}
+
 match /cigars/{cigarId} {
 
   // Catalog remains publicly readable.
@@ -50,7 +57,8 @@ match /cigars/{cigarId} {
 
   // Only active Owner/Admin users can change master cigar data,
   // pricing, sizes, or package information.
-  allow create, update, delete: if isManager();
+  allow create, update: if isManager() && validCatalogImage(request.resource.data);
+  allow delete: if isManager();
 }
 
 // -------------------------------

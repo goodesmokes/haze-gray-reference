@@ -18,12 +18,16 @@ assert.match(source,/import \{ DetailOrderControls \} from "\.\/js\/components\/
 assert.match(source,/<DetailOrderControls key=\{selected\.id\} cigar=\{selected\}/);
 const rules=fs.readFileSync('firestore.rules','utf8').replace(/\r\n/g,'\n');
 const oldRules=cp.execFileSync('git',['show','HEAD:firestore.rules'],{encoding:'utf8'}).replace(/\r\n/g,'\n');
-// Exclude only the new orders section on both sides, whether HEAD predates or includes it.
-// Catalog, Authorized Users, legacy access and the catch-all remain compared in full.
-const legacyRules = (value) => value.replace(/\/\/ -------------------------------\n\/\/ IMMUTABLE SAVED ORDERS[\s\S]*?(?=\/\/ Everything else denied\.)/,'');
+// Normalize the orders section and Phase 8C image restriction only.
+// Catalog authorization, Authorized Users, legacy access and catch-all remain compared.
+// Emulator tests exercise the new image restriction with real rule evaluation.
+const legacyRules = (value) => value
+  .replace(/\/\/ Keep this path contract aligned with js\/domain\/catalog-images[.]mjs[.]\nfunction validCatalogImage\(data\) \{[\s\S]*?\n\}\n\n/, '')
+  .replace('allow create, update: if isManager() && validCatalogImage(request.resource.data);\n  allow delete: if isManager();', 'allow create, update, delete: if isManager();')
+  .replace(/\/\/ -------------------------------\n\/\/ IMMUTABLE SAVED ORDERS[\s\S]*?(?=\/\/ Everything else denied\.)/,'');
 assert.equal(legacyRules(rules),legacyRules(oldRules));
 assert.equal(legacyRules(rules),legacyRules(legacyRules(rules)), 'Normalization must work with or without the orders section');
-assert.notEqual(legacyRules(rules.replace('allow create, update, delete: if isManager();','allow create, update, delete: if true;')),legacyRules(rules), 'Catalog changes must remain detectable');
+assert.notEqual(legacyRules(rules.replace('allow create, update: if isManager() && validCatalogImage(request.resource.data);','allow create, update: if true;')),legacyRules(rules), 'Catalog changes must remain detectable');
 assert.notEqual(legacyRules(rules.replace('request.resource.data.role == resource.data.role','true')),legacyRules(rules), 'Authorized Users protection changes must remain detectable');
 console.log('PASS preservation: config, seed data, gauges, catalog/Authorized Users rules, pricing, original order handlers and exports');
 const ctx={console,TextEncoder};vm.createContext(ctx);

@@ -1,5 +1,6 @@
 import { collection, deleteDoc, doc, getDoc, getDocs, onSnapshot, setDoc } from "firebase/firestore";
 import { db } from "./firebase.mjs";
+import { validateCatalogImage } from "../domain/catalog-images.mjs";
 
 const FIRESTORE_API = { collection, deleteDoc, doc, getDoc, getDocs, onSnapshot, setDoc };
 
@@ -21,13 +22,20 @@ export function createCatalogService(database, api = FIRESTORE_API) {
     return catalogSnapshot.empty && legacySnapshot.exists() && Boolean(legacySnapshot.data().payload);
   };
 
-  const saveCatalogRecord = (record) => api.setDoc(api.doc(database, "cigars", record.id), record);
+  const saveCatalogRecord = async (record) => {
+    validateCatalogImage(record);
+    return api.setDoc(api.doc(database, "cigars", record.id), record);
+  };
   const deleteCatalogRecord = (id) => api.deleteDoc(api.doc(database, "cigars", id));
 
   const readLegacyCatalog = async () => {
     const snapshot = await api.getDoc(legacyDocument);
     if (!snapshot.exists() || !snapshot.data().payload) return null;
-    return JSON.parse(snapshot.data().payload);
+    const records = JSON.parse(snapshot.data().payload);
+    if (!Array.isArray(records)) throw new Error("Legacy catalog must be an array.");
+    // Preflight the entire import before the caller starts sequential writes.
+    records.forEach(validateCatalogImage);
+    return records;
   };
 
   return {

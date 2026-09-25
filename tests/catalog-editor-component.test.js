@@ -4,7 +4,7 @@ const { loadClient } = require('./client-helpers.cjs');
 const { collectNamedNodes, extractInlineModule, nodeText, readRepositoryFile } = require('./test-support.cjs');
 
 const source = extractInlineModule();
-const names = ['HazeGrayReference', 'fileToCompressedDataUrl', 'handlePhotoFile', 'openAdd', 'openEdit', 'setSizeField', 'addSizeRow', 'removeSizeRow', 'saveForm', 'saveCigarDoc', 'doDelete'];
+const names = ['HazeGrayReference', 'openAdd', 'openEdit', 'setSizeField', 'addSizeRow', 'removeSizeRow', 'saveForm', 'saveCigarDoc', 'doDelete'];
 const nodes = collectNamedNodes(source, (name) => names.includes(name));
 const root = nodeText(source, nodes, 'HazeGrayReference');
 const text = (name) => nodeText(source, nodes, name);
@@ -19,19 +19,16 @@ const editorMarkup = readRepositoryFile('js/components/catalog-editor.mjs');
 test('Catalog Editor add and edit entry points reset from defaults or the selected cigar', () => {
   let form;
   let editingId = 'stale-id';
-  let uploadError = 'stale error';
   let formOpen = false;
   const setters = {
     setForm: (value) => { form = value; },
     setEditingId: (value) => { editingId = value; },
-    setUploadError: (value) => { uploadError = value; },
     setFormOpen: (value) => { formOpen = value; }
   };
   const openAdd = compile('openAdd', { requirePermission: () => true, setForm: setters.setForm, EMPTY_FORM, ...setters });
   openAdd();
   assert.equal(form, EMPTY_FORM);
   assert.equal(editingId, null);
-  assert.equal(uploadError, '');
   assert.equal(formOpen, true);
 
   const openEdit = compile('openEdit', { requirePermission: () => true, setForm: setters.setForm, newSizeRow, ...setters });
@@ -85,7 +82,7 @@ test('Catalog Editor save preserves add/edit IDs and the exact catalog record sh
     ...EMPTY_FORM,
     name: '  Test Cigar  ',
     line: 'Line',
-    imageUrl: 'data:image/jpeg;base64,kept',
+    imageUrl: '/haze-gray-reference/assets/cigars/Backpack.webp',
     strength: '4',
     body: '3',
     tastingNotes: 'cedar, cocoa, ',
@@ -124,7 +121,9 @@ test('Catalog Editor save preserves add/edit IDs and the exact catalog record sh
     keystoneSingle: '$6.00 box / $5.75 bundle', keystoneBox10: '$60', keystoneBox20: '', keystoneBundle20: 'bad',
     pricing: { msrp: 12, boxSingle: 6, bundleSingle: 5.75, box10: 60, box20: null, bundle20: null }
   }]);
-  assert.equal(runSave('existing-id').saved.id, 'existing-id');
+  const edited = runSave('existing-id');
+  assert.equal(edited.saved.id, 'existing-id');
+  assert.equal(edited.saved.imageUrl, baseForm.imageUrl, 'ordinary edits preserve the exact static image reference');
 
   let called = false;
   compile('saveForm', { requirePermission: () => true, form: { ...baseForm, name: '   ' }, editingId: null, Date, parseMoney: client.parseMoney, getSinglePrice: client.getSinglePrice, saveCigarDoc: () => { called = true; }, setFormOpen: () => { called = true; } })();
@@ -132,52 +131,13 @@ test('Catalog Editor save preserves add/edit IDs and the exact catalog record sh
   assert.match(text('saveForm'), /requirePermission\("canEditCatalog"\).*requirePermission\("canEditPackages"\)/s);
 });
 
-test('browser image compression and editor upload handling preserve success and failure behavior', async () => {
-  let canvas;
-  class FakeFileReader {
-    readAsDataURL() { this.result = 'data:image/png;base64,input'; this.onload(); }
-  }
-  class FakeImage {
-    set src(value) { this._src = value; this.width = 960; this.height = 480; this.onload(); }
-  }
-  const document = { createElement: () => (canvas = { width: 0, height: 0, getContext: () => ({ drawImage: (...args) => { canvas.drawArgs = args; } }), toDataURL: (type, quality) => `${type}:${quality}:compressed` }) };
-  const compress = compile('fileToCompressedDataUrl', { FileReader: FakeFileReader, Image: FakeImage, document });
-  assert.equal(await compress({}), 'image/jpeg:0.6:compressed');
-  assert.equal(canvas.width, 480);
-  assert.equal(canvas.height, 240);
-  assert.equal(canvas.drawArgs.length, 5);
-
-  let form = { imageUrl: 'existing' };
-  let uploading = false;
-  let uploadError = 'old';
-  const handle = compile('handlePhotoFile', {
-    requirePermission: () => true,
-    setUploading: (value) => { uploading = value; },
-    setUploadError: (value) => { uploadError = value; },
-    fileToCompressedDataUrl: async () => 'data:image/jpeg;base64,new',
-    setForm: (update) => { form = update(form); }
-  });
-  await handle({ type: 'image/png' });
-  assert.equal(form.imageUrl, 'data:image/jpeg;base64,new');
-  assert.equal(uploadError, '');
-  assert.equal(uploading, false);
-  await handle({ type: 'text/plain' });
-  assert.equal(uploadError, 'Please choose an image file.');
-
-  const failed = compile('handlePhotoFile', {
-    requirePermission: () => true,
-    setUploading: (value) => { uploading = value; },
-    setUploadError: (value) => { uploadError = value; },
-    fileToCompressedDataUrl: async () => { throw new Error('bad image'); },
-    setForm: () => assert.fail('failed compression replaced the image')
-  });
-  await failed({ type: 'image/jpeg' });
-  assert.equal(uploadError, "Couldn't process that photo — try a different file.");
-  assert.equal(uploading, false);
-  assert.match(editorMarkup, /ref: fileInputRef[\s\S]*?accept: "image\/\*"[\s\S]*?onPhotoFile\(event\.target\.files && event\.target\.files\[0\]\)/);
-  assert.match(editorMarkup, /fileInputRef\.current && fileInputRef\.current\.click\(\)/);
-  assert.match(editorMarkup, /form\.imageUrl \? "Replace photo" : "Upload photo"/);
-  assert.match(editorMarkup, /onFormChange\(\(current\) => \(\{ \.\.\.current, imageUrl: "" \}\)\)/);
+test('editor offers a static path and preview without file upload controls', () => {
+  assert.match(editorMarkup, /Catalog Image Path/);
+  assert.match(editorMarkup, /value: form.imageUrl \?\? ""/);
+  assert.match(editorMarkup, /src: form.imageUrl/);
+  assert.match(editorMarkup, /disabled: !validImage/);
+  assert.doesNotMatch(source + editorMarkup, /FileReader|readAsDataURL|toDataURL|fileToCompressedDataUrl|handlePhotoFile|fileInputRef|type: "file"/);
+  assert.match(source, /const LOGO_DATA_URL = "data:image\/png;base64,/);
 });
 
 test('Catalog Editor modal, permission-loss and delete behavior remain wired at the root', () => {
@@ -188,19 +148,18 @@ test('Catalog Editor modal, permission-loss and delete behavior remain wired at 
   assert.match(root, /if \(!canEditCatalog\) \{ setFormOpen\(false\); setConfirmDeleteId\(null\); \}/);
   assert.match(root, /\{formOpen && canEditCatalog && canEditPackages && \(/);
   assert.match(editorMarkup, /onClick: onSave[\s\S]*?editingId \? "Save Changes" : "Add Cigar"/);
-  assert.doesNotMatch(editorMarkup, /savingCatalog|disabled:/, 'the current editor has no separate busy state');
+  assert.match(editorMarkup, /disabled: !validImage/);
   assert.match(root, /confirmDeleteId && canEditCatalog/);
   assert.match(root, /onClick=\{\(\) => doDelete\(confirmDeleteId\)\}/);
   assert.match(text('doDelete'), /requirePermission\("canEditCatalog"\)[\s\S]*?deleteCigarDoc\(id\)[\s\S]*?setConfirmDeleteId\(null\)[\s\S]*?if \(selectedId === id\) setSelectedId\(null\)/);
   assert.match(text('saveCigarDoc'), /saveCatalogRecord\(record\)[\s\S]*?Save failed — your change may not persist/);
 });
 
-test('Catalog Editor keeps policy in root permission callbacks and image processing outside catalog service', () => {
-  for (const handler of ['openAdd', 'openEdit', 'handlePhotoFile', 'saveCigarDoc', 'doDelete']) assert.match(text(handler), /requirePermission\("canEditCatalog"\)/, handler);
+test('Catalog Editor keeps root permission callbacks without legacy image processing', () => {
+  for (const handler of ['openAdd', 'openEdit', 'saveCigarDoc', 'doDelete']) assert.match(text(handler), /requirePermission\("canEditCatalog"\)/, handler);
   for (const handler of ['setSizeField', 'addSizeRow', 'removeSizeRow']) assert.match(text(handler), /requirePermission\("canEditPackages"\)/, handler);
   assert.match(text('saveForm'), /requirePermission\("canEditCatalog"\).*requirePermission\("canEditPackages"\)/s);
   assert.doesNotMatch(editorMarkup, /ROLE_PERMISSIONS|ROLE_LABELS|getProfilePermissions/, 'the editor markup does not duplicate role policy');
-  assert.match(text('handlePhotoFile'), /fileToCompressedDataUrl\(file\)/);
   assert.doesNotMatch(text('saveCigarDoc'), /FileReader|Image|canvas|fileToCompressedDataUrl/);
 });
 
@@ -213,10 +172,7 @@ test('Catalog Editor is extracted without moving root-owned editor state or dupl
   for (const initializer of [
     'const [formOpen, setFormOpen] = useState(false)',
     'const [editingId, setEditingId] = useState(null)',
-    'const [form, setForm] = useState(EMPTY_FORM)',
-    'const [uploading, setUploading] = useState(false)',
-    'const [uploadError, setUploadError] = useState("")',
-    'const fileInputRef = useRef(null)'
+    'const [form, setForm] = useState(EMPTY_FORM)'
   ]) assert(root.includes(initializer), initializer);
   assert.match(root, /<CatalogEditor form=\{form\} editingId=\{editingId\}[\s\S]*?onSave=\{saveForm\}/);
 });

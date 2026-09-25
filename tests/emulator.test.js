@@ -40,6 +40,25 @@ test('Spark browser SDK and Auth/Firestore rules', { skip: !enabled, timeout: 12
     const reference = (a) => sdk.doc(sdk.collection(a.db,'orders'));
     const write = (a,payload,ref=reference(a)) => sdk.setDoc(ref,{...payload,savedAt:sdk.serverTimestamp()});
     const denied = (promise) => assert.rejects(promise,e=>e.code==='permission-denied');
+    await t.test('catalog image rules preserve manager access and reject invalid references', async () => {
+      const prefix = '/haze-gray-reference/assets/cigars/';
+      const names = ['1982.webp', '1996.webp', 'admiral.webp', 'Backpack.webp', 'Brotherhood.webp', 'bussola.webp', 'HazeGray.webp', 'Irmaos_do_Mar.webp', 'Patriot.webp', 'future-cigar_2027.webp'];
+      for (const manager of [owner, admin]) {
+        const ref = sdk.doc(manager.db, 'cigars', 'image-rules-' + manager.role);
+        for (const imageUrl of ['', ...names.map(name => prefix + name)]) await sdk.setDoc(ref, { name: 'Image test', imageUrl });
+        for (const imageUrl of ['data:image/png;base64,abc', 'YWJjZA==', 'http://example.com/a.webp', 'https://example.com/a.webp', '/elsewhere/a.webp', prefix + '../a.webp', prefix + 'a.webp\n', prefix + 'a.webp?x=1', prefix + 'a'.repeat(240) + '.webp', null, 1, {}, []]) {
+          await denied(sdk.updateDoc(ref, { imageUrl }));
+          await denied(sdk.setDoc(sdk.doc(manager.db, 'cigars', 'invalid-new'), { imageUrl }));
+        }
+        await sdk.setDoc(ref, { name: 'No photo' });
+        await sdk.deleteDoc(ref);
+      }
+      for (const a of actors.filter(a => ![owner, admin].includes(a))) {
+        await denied(sdk.setDoc(sdk.doc(a.db, 'cigars', 'unauthorized'), { imageUrl: prefix + '1982.webp' }));
+        await denied(sdk.updateDoc(sdk.doc(a.db, 'cigars', 'test'), { imageUrl: '' }));
+        await denied(sdk.deleteDoc(sdk.doc(a.db, 'cigars', 'test')));
+      }
+    });
     const savedRefs = new Map();
     await t.test('Owner/Admin/Field Rep create; all other identities denied', async()=>{
       for (const a of allowed) { const ref=reference(a);await write(a,make(a),ref);savedRefs.set(a.role,ref.id); }

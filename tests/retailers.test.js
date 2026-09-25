@@ -95,10 +95,11 @@ test('directory subscriptions fail closed across account, role changes and error
  fail(new Error('denied'));assert.deepEqual(state.records,[]);assert.match(state.error,/denied/);
  cleanup();auth.currentUser=null;hook(null,null,false);assert.deepEqual(state.records,[]);assert.equal(stopped,2);
 });
-test('only optional territory validation and permissions change in Firestore rules',()=>{
+test('retailer rules preserve all behavior outside optional territory validation and permissions',()=>{
  const current=fs.readFileSync('firestore.rules','utf8').replace(/\r\n/g,'\n');
  const old=cp.execFileSync('git',['show','HEAD:firestore.rules'],{encoding:'utf8'}).replace(/\r\n/g,'\n');
- const withoutTerritory=value=>value
+ // Catalog changes are covered by client preservation and emulator tests.
+ const withoutTerritory=value=>value.slice(value.indexOf('// SHARED RETAILER DIRECTORY'))
  .replace("&& (isManager() || (request.resource.data.get('territory', '').trim() == userDoc(request.auth.uid).data.get('territory', '').trim()\n      && (!('assignedRepUids' in request.resource.data) || request.resource.data.assignedRepUids == [])))", "&& (isManager() || !('assignedRepUids' in request.resource.data) || request.resource.data.assignedRepUids == [])")
  .replace("&& (isManager() || (resource.data.active == true && request.resource.data.active == resource.data.active\n      && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['assignedRepUids', 'territory', 'territoryNormalized'])))", "&& (isManager() || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['assignedRepUids']))\n    && (isManager() || (resource.data.active == true && request.resource.data.active == resource.data.active))")
  .replace(/\/\/ Optional organizational territory[\s\S]*?(?=function validRetailer\()/,'')

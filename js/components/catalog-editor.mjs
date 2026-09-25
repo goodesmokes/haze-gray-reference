@@ -1,5 +1,6 @@
 import React from "react";
-import { Cigarette, Loader2, Plus, Upload, X } from "lucide-react";
+import { Cigarette, Plus, X } from "lucide-react";
+import { isValidCatalogImageUrl, CATALOG_IMAGE_ERROR } from "../domain/catalog-images.mjs";
 
 const h = React.createElement;
 const labelStyle = { fontFamily: "'Oswald', sans-serif", fontSize: 11, letterSpacing: 1.5, color: "#8A93A0", textTransform: "uppercase" };
@@ -13,7 +14,8 @@ function TextField({ field, label, form, onChange }) {
   );
 }
 
-export function CatalogEditor({ form, editingId, uploading, uploadError, fileInputRef, onClose, onFormChange, onPhotoFile, onSetSizeField, onAddSize, onRemoveSize, onSave }) {
+export function CatalogEditor({ form, editingId, onClose, onFormChange, onSetSizeField, onAddSize, onRemoveSize, onSave }) {
+  const validImage = isValidCatalogImageUrl(form.imageUrl);
   return h("div", {
     style: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, zIndex: 50 },
     onClick: onClose
@@ -30,32 +32,20 @@ export function CatalogEditor({ form, editingId, uploading, uploadError, fileInp
     h(TextField, { field: "name", label: "Name", form, onChange: onFormChange }),
     h(TextField, { field: "line", label: "Line / Series", form, onChange: onFormChange }),
     h("div", { style: { marginBottom: 12 } },
-      h("label", { style: labelStyle }, "Photo"),
-      h("div", { style: { display: "flex", gap: 12, alignItems: "center", marginTop: 6 } },
-        h("div", { style: { width: 64, height: 64, flex: "0 0 64px", borderRadius: 4, background: "#0e0d0b", border: "1px solid #3B2A1E", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" } },
-          uploading
-            ? h(Loader2, { size: 20, color: "#B8894C", className: "hg-spin" })
-            : form.imageUrl
-              ? h("img", { src: form.imageUrl, alt: "", style: { width: "100%", height: "100%", objectFit: "cover" } })
-              : h(Cigarette, { size: 22, color: "#454b53" })
-        ),
-        h("div", { style: { flex: 1 } },
-          h("input", { ref: fileInputRef, type: "file", accept: "image/*", onChange: (event) => onPhotoFile(event.target.files && event.target.files[0]), style: { display: "none" } }),
-          h("button", { type: "button", className: "hg-btn", onClick: () => fileInputRef.current && fileInputRef.current.click(), style: { display: "flex", alignItems: "center", gap: 6, background: "none", border: "1px solid #6E7681", color: "#C9CFD6", borderRadius: 4, padding: "7px 12px", fontFamily: "'Oswald', sans-serif", fontSize: 12.5 } },
-            h(Upload, { size: 14 }), " ", form.imageUrl ? "Replace photo" : "Upload photo"
-          ),
-          form.imageUrl && h("button", { type: "button", className: "hg-btn", onClick: () => onFormChange((current) => ({ ...current, imageUrl: "" })), style: { background: "none", border: "none", color: "#8A93A0", fontFamily: "'Oswald', sans-serif", fontSize: 12, marginLeft: 10, textDecoration: "underline" } }, "Remove")
-        )
+      h("label", { htmlFor: "catalog-image-path", style: labelStyle }, "Catalog Image Path"),
+      h("input", {
+        id: "catalog-image-path", value: form.imageUrl ?? "",
+        placeholder: "/haze-gray-reference/assets/cigars/example.webp",
+        "aria-invalid": !validImage, "aria-describedby": "catalog-image-help",
+        onChange: (event) => onFormChange({ ...form, imageUrl: event.target.value }), style: inputStyle
+      }),
+      h("div", { id: "catalog-image-help", role: validImage ? undefined : "alert", style: { color: validImage ? "#8A93A0" : "#d98a7c", fontSize: 12, marginTop: 6 } },
+        validImage ? "Enter the path of a WebP image already in the repository. Match the filename capitalization exactly. Leave empty for no image." : CATALOG_IMAGE_ERROR
       ),
-      uploadError && h("div", { style: { color: "#d98a7c", fontSize: 12, marginTop: 6, fontFamily: "'Oswald', sans-serif" } }, uploadError),
-      h("div", { style: { marginTop: 8 } },
-        h("label", { style: { fontFamily: "'Oswald', sans-serif", fontSize: 10.5, letterSpacing: 1, color: "#5c636b", textTransform: "uppercase" } }, "Or paste an image URL"),
-        h("input", {
-          value: form.imageUrl && form.imageUrl.startsWith("data:") ? "" : form.imageUrl,
-          placeholder: form.imageUrl && form.imageUrl.startsWith("data:") ? "Uploaded photo in use" : "",
-          onChange: (event) => onFormChange({ ...form, imageUrl: event.target.value }),
-          style: inputStyle
-        })
+      h("div", { style: { width: 64, height: 64, marginTop: 8, overflow: "hidden" } },
+        validImage && form.imageUrl
+          ? h("img", { src: form.imageUrl, alt: "Catalog image preview", style: { width: "100%", height: "100%", objectFit: "cover" } })
+          : h(Cigarette, { size: 22, color: "#454b53" })
       )
     ),
     [["wrapper", "Wrapper"], ["binder", "Binder"], ["filler", "Filler"], ["origin", "Origin"]].map(([field, label]) => h(TextField, { key: field, field, label, form, onChange: onFormChange })),
@@ -94,7 +84,7 @@ export function CatalogEditor({ form, editingId, uploading, uploadError, fileInp
     ),
     h("div", { style: { display: "flex", gap: 10, justifyContent: "flex-end" } },
       h("button", { className: "hg-btn", onClick: onClose, style: { background: "none", border: "1px solid #454b53", color: "#C9CFD6", borderRadius: 4, padding: "9px 16px", fontFamily: "'Oswald', sans-serif", fontSize: 13 } }, "Cancel"),
-      h("button", { className: "hg-btn", onClick: onSave, style: { background: "#B8894C", border: "none", color: "#14161A", borderRadius: 4, padding: "9px 16px", fontFamily: "'Oswald', sans-serif", fontWeight: 600, fontSize: 13 } }, editingId ? "Save Changes" : "Add Cigar")
+      h("button", { className: "hg-btn", onClick: onSave, disabled: !validImage, style: { background: "#B8894C", border: "none", color: "#14161A", borderRadius: 4, padding: "9px 16px", fontFamily: "'Oswald', sans-serif", fontWeight: 600, fontSize: 13 } }, editingId ? "Save Changes" : "Add Cigar")
     )
   ));
 }

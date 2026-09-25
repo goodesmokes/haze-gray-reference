@@ -33,11 +33,11 @@ test('catalog service preserves collection paths, subscription mapping and error
   assert.equal(typeof unsubscribe, 'function');
   assert.equal(state.snapshots[0].reference.path, 'cigars');
   state.snapshots[0].onRecords({ docs: [
-    { id: 'one', data: () => ({ name: 'First', imageUrl: 'data:image/png;base64,abc' }) },
+    { id: 'one', data: () => ({ name: 'First', imageUrl: '/haze-gray-reference/assets/cigars/1982.webp' }) },
     { id: 'two', data: () => ({ id: 'stored-id', name: 'Second' }) }
   ] });
   assert.deepEqual(records, [
-    { name: 'First', imageUrl: 'data:image/png;base64,abc', id: 'one' },
+    { name: 'First', imageUrl: '/haze-gray-reference/assets/cigars/1982.webp', id: 'one' },
     { id: 'two', name: 'Second' }
   ]);
   const expectedError = new Error('listener failed');
@@ -51,7 +51,7 @@ test('catalog service saves and deletes exact cigar document paths without trans
   const { createCatalogService } = await importNativeModule('js/services/catalog-service.mjs');
   const { api, state } = createFakeApi();
   const service = createCatalogService({}, api);
-  const record = { id: 'cigar-id', name: 'Cigar', imageUrl: 'data:image/jpeg;base64,xyz', sizes: [{ key: 'size', msrp: '$12.00' }], legacyField: true };
+  const record = { id: 'cigar-id', name: 'Cigar', imageUrl: '/haze-gray-reference/assets/cigars/1996.webp', sizes: [{ key: 'size', msrp: '$12.00' }], legacyField: true };
   await service.saveCatalogRecord(record);
   assert.equal(state.sets[0].reference.path, 'cigars/cigar-id');
   assert.equal(state.sets[0].value, record);
@@ -79,7 +79,7 @@ test('migration availability requires an empty catalog and a populated legacy pa
 
 test('legacy payload parsing preserves records and rejects malformed JSON', async () => {
   const { createCatalogService } = await importNativeModule('js/services/catalog-service.mjs');
-  const record = { id: 'legacy', imageUrl: 'data:image/png;base64,legacy', sizes: [{ key: 'original' }], custom: { unchanged: true } };
+  const record = { id: 'legacy', imageUrl: '/haze-gray-reference/assets/cigars/Backpack.webp', sizes: [{ key: 'original' }], custom: { unchanged: true } };
   const valid = createFakeApi();
   valid.state.legacySnapshot = { exists: () => true, data: () => ({ payload: JSON.stringify([record]) }) };
   assert.deepEqual(await createCatalogService({}, valid.api).readLegacyCatalog(), [record]);
@@ -100,7 +100,7 @@ function loadMigrationHandler(environment) {
 }
 
 test('migration orchestration keeps writes sequential and preserves each record', async () => {
-  const records = [{ id: 'a', imageUrl: 'first' }, { id: 'b', imageUrl: 'second' }, { id: 'c', imageUrl: 'third' }];
+  const records = [{ id: 'a', imageUrl: '/haze-gray-reference/assets/cigars/1982.webp' }, { id: 'b', imageUrl: '/haze-gray-reference/assets/cigars/1996.webp' }, { id: 'c', imageUrl: '/haze-gray-reference/assets/cigars/admiral.webp' }];
   const writes = [];
   let activeWrites = 0;
   let maximumActiveWrites = 0;
