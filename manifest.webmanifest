@@ -1,0 +1,17 @@
+{
+  "id": "/haze-gray-reference/",
+  "name": "Haze Gray Reference",
+  "short_name": "Haze Gray",
+  "description": "Haze Gray Cigars field reference. Network access is still required for application startup and live data.",
+  "start_url": "/haze-gray-reference/",
+  "scope": "/haze-gray-reference/",
+  "display": "standalone",
+  "background_color": "#14161A",
+  "theme_color": "#14161A",
+  "lang": "en",
+  "icons": [
+    { "src": "/haze-gray-reference/assets/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/haze-gray-reference/assets/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/haze-gray-reference/assets/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
