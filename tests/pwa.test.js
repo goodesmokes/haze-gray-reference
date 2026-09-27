@@ -8,8 +8,35 @@ const root = path.join(__dirname, '..');
 const read = name => fs.readFileSync(path.join(root, name), 'utf8');
 const scope = '/haze-gray-reference/';
 const origin = 'https://goodesmokes.github.io';
-const foundation = ['index.html', 'manifest.webmanifest', 'js/pwa-register.mjs', 'assets/icons/icon-192.png', 'assets/icons/icon-512.png', 'assets/icons/icon-maskable-512.png', 'assets/icons/apple-touch-icon.png'].map(name => scope + name);
-const cacheName = 'haze-gray-reference-pwa-foundation-v1';
+const shellFiles = [
+  'index.html', 'manifest.webmanifest', 'js/pwa-register.mjs',
+  'assets/icons/icon-192.png', 'assets/icons/icon-512.png',
+  'assets/icons/icon-maskable-512.png', 'assets/icons/apple-touch-icon.png',
+  'js/app.jsx',
+  'js/components/authorization-ui.mjs', 'js/components/catalog-editor.mjs',
+  'js/components/catalog-list.mjs', 'js/components/cigar-detail.mjs',
+  'js/components/common-ui.mjs', 'js/components/comparison-view.mjs',
+  'js/components/detail-order-controls.mjs', 'js/components/final-review.mjs',
+  'js/components/order-builder.mjs', 'js/components/order-history.mjs',
+  'js/components/retailer-directory.mjs', 'js/components/retailer-editors.mjs',
+  'js/components/save-order-panel.mjs', 'js/domain/assignments.mjs',
+  'js/domain/authorization.mjs', 'js/domain/catalog-data.mjs',
+  'js/domain/catalog-images.mjs', 'js/domain/pricing.mjs',
+  'js/domain/retailers.mjs', 'js/domain/saved-orders.mjs',
+  'js/domain/territories.mjs', 'js/services/auth-service.mjs',
+  'js/services/catalog-service.mjs', 'js/services/firebase.mjs',
+  'js/services/order-service.mjs', 'js/services/profile-service.mjs',
+  'js/services/retailer-service.mjs', 'js/ui/styles.mjs',
+  'vendor/babel/7.24.7/babel.min.js', 'vendor/react/18.3.1/react.mjs',
+  'vendor/react-dom/18.3.1/client.mjs', 'vendor/react-dom/18.3.1/react-dom.mjs',
+  'vendor/scheduler/0.23.2/scheduler.mjs',
+  'vendor/lucide-react/0.383.0/lucide-react.mjs',
+  'vendor/firebase/10.12.2/firebase-app.js',
+  'vendor/firebase/10.12.2/firebase-auth.js',
+  'vendor/firebase/10.12.2/firebase-firestore.js'
+];
+const shell = shellFiles.map(name => scope + name);
+const cacheName = 'haze-gray-reference-pwa-shell-v2';
 
 function worker({ network = async () => new Response('network'), entries = new Map(), names = [], installFailure = false } = {}) {
   const handlers = new Map(), opened = [], deleted = [], added = [], fetched = [];
@@ -62,6 +89,8 @@ test('HTML links installation resources without replacing the existing applicati
   assert.match(html, /name="theme-color" content="#14161A"/);
   assert.match(html, /type="module" src="\.\/js\/pwa-register.mjs"/);
   assert.match(html, /type="importmap"/);
+  assert.match(html, /src="\.\/vendor\/babel\/7\.24\.7\/babel\.min\.js"/);
+  assert.doesNotMatch(html, /(?:src|href)="https:\/\/(?:esm\.sh|www\.gstatic\.com\/firebasejs|cdnjs\.cloudflare\.com)\//);
   assert.match(html, /type="text\/babel" data-type="module" data-presets="react" src="\.\/js\/app.jsx"/);
 });
 
@@ -94,36 +123,38 @@ test('registration is scoped, nonblocking, feature-detected and never reloads a 
   assert.equal(failed.warnings.length, 1);
 });
 
-test('install caches only the seven deterministic local foundation resources', async () => {
+test('install atomically caches the complete 45-resource local executable shell', async () => {
   const app = worker();
   await app.lifecycle('install');
   assert.deepEqual(app.opened, [cacheName]);
-  assert.deepEqual(app.added.map(request => new URL(request.url).pathname), foundation);
+  assert.deepEqual(app.added.map(request => new URL(request.url).pathname), shell);
   for (const request of app.added) {
     assert.equal(new URL(request.url).origin, origin);
     assert.equal(request.cache, 'reload');
     assert(fs.existsSync(path.join(root, new URL(request.url).pathname.slice(scope.length))));
   }
-  await assert.rejects(worker({ installFailure: true }).lifecycle('install'), /install unavailable/);
+  const failed = worker({ installFailure: true });
+  await assert.rejects(failed.lifecycle('install'), /install unavailable/);
+  assert.deepEqual(failed.deleted, [cacheName]);
 });
 
-test('activation deletes only older application foundation caches without taking over active clients', async () => {
-  const old = 'haze-gray-reference-pwa-foundation-v0';
-  const app = worker({ names: [old, cacheName, 'another-app-v1', 'haze-gray-reference-catalog-v1'] });
+test('activation deletes only older Haze Gray PWA caches without taking over active clients', async () => {
+  const oldFoundation = 'haze-gray-reference-pwa-foundation-v1';
+  const oldShell = 'haze-gray-reference-pwa-shell-v1';
+  const app = worker({ names: [oldFoundation, oldShell, cacheName, 'another-app-v1', 'haze-gray-reference-catalog-v1'] });
   await app.lifecycle('activate');
-  assert.deepEqual(app.deleted, [old]);
+  assert.deepEqual(app.deleted, [oldFoundation, oldShell]);
   assert.deepEqual([...app.handlers.keys()], ['install', 'activate', 'fetch']);
 });
 
-test('only root and index navigation receive cached HTML on network failure', async () => {
+test('controlled root and index navigation stay on the cached shell version', async () => {
   for (const endpoint of [scope, scope + 'index.html']) {
-    const app = worker({ network: async () => { throw new Error('offline'); }, entries: new Map([[scope + 'index.html', new Response('shell')]]) });
+    const app = worker({ network: async () => new Response('new deployment'), entries: new Map([[scope + 'index.html', new Response('shell')]]) });
     assert.equal(await (await app.request(endpoint, 'navigate')).text(), 'shell');
+    assert.deepEqual(app.fetched, []);
   }
   const online = worker({ network: async () => new Response('fresh') });
   assert.equal(await (await online.request(scope, 'navigate')).text(), 'fresh');
-  const missing = worker({ network: async () => new Response('not found', { status: 404 }) });
-  assert.equal((await missing.request(scope, 'navigate')).status, 404);
   const noCache = worker({ network: async () => { throw new Error('offline'); } });
   await assert.rejects(noCache.request(scope, 'navigate'), /offline/);
 });
@@ -134,13 +165,13 @@ test('static-resource failures never receive the cached index document', async (
     assert.equal(app.request(scope + resource), undefined);
     assert.equal(app.request(scope + resource, 'navigate'), undefined);
   }
-  for (const resource of ['manifest.webmanifest', 'assets/icons/icon-192.png', 'js/pwa-register.mjs']) {
+  for (const resource of ['manifest.webmanifest', 'assets/icons/icon-192.png', 'js/pwa-register.mjs', 'js/app.jsx', 'vendor/react/18.3.1/react.mjs']) {
     await assert.rejects(app.request(scope + resource), /offline/);
     assert.equal(app.request(scope + resource, 'navigate'), undefined);
   }
 });
 
-test('API, Firebase, auth, orders, profiles, retailers, CDN and out-of-scope requests are untouched', () => {
+test('API, Firebase data, auth, orders, profiles, retailers, CDN and out-of-scope requests are untouched', () => {
   const app = worker();
   const urls = ['/', '/other-app/', '/haze-gray-reference-other/', scope + 'api/cigars', scope + 'orders', scope + 'users', scope + 'profiles', scope + 'retailers', scope + 'auth', scope + 'pending-order', scope + '?token=example', scope + 'manifest.webmanifest?token=example', 'https://firestore.googleapis.com/v1/projects/test', 'https://identitytoolkit.googleapis.com/v1/accounts:lookup', 'https://securetoken.googleapis.com/v1/token', 'https://haze-gray-cigars.firebaseapp.com/__/auth/handler', 'https://esm.sh/react@18.3.1', 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js'];
   for (const url of urls) for (const mode of ['cors', 'navigate']) assert.equal(app.request(url, mode), undefined, url);

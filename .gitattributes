@@ -1,0 +1,2 @@
+vendor/**/*.js -text whitespace=-trailing-space
+vendor/**/*.mjs -text whitespace=-trailing-space
