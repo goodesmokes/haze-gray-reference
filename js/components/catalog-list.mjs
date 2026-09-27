@@ -44,8 +44,9 @@ export function CatalogList({ cigars, filtered, groupedFiltered, query, onQueryC
                 compareMode
                   ? h("div", { style: { width: 20, height: 20, flex: "0 0 20px", borderRadius: 4, border: isChecked ? "none" : "1px solid #6E7681", background: isChecked ? "#B8894C" : "transparent", display: "flex", alignItems: "center", justifyContent: "center" } }, isChecked && h("span", { style: { color: "#14161A", fontSize: 13, fontWeight: 700 } }, "✓"))
                   : h(Cigarette, { size: 16, color: "#454b53", style: { flex: "0 0 16px" } }),
-                h("div", { style: { width: 44, height: 44, borderRadius: 4, background: "#0e0d0b", flex: "0 0 44px", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", border: "1px solid #3B2A1E" } },
-                  c.imageUrl ? h("img", { src: c.imageUrl, alt: "", style: { width: "100%", height: "100%", objectFit: "cover" } }) : h(Cigarette, { size: 20, color: "#454b53" })
+                h("div", { style: { width: 44, height: 44, borderRadius: 4, background: "#0e0d0b", flex: "0 0 44px", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", border: "1px solid #3B2A1E", position: "relative" } },
+                  h(Cigarette, { size: 20, color: "#454b53" }),
+                  c.imageUrl && h("img", { src: c.imageUrl, alt: "", onError: (event) => { event.currentTarget.style.display = "none"; }, style: { position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" } })
                 ),
                 h("div", { style: { flex: 1, minWidth: 0 } },
                   h("div", { style: { fontFamily: "'Bebas Neue', sans-serif", fontSize: 20, letterSpacing: 0.5, lineHeight: 1.1 } }, c.name),

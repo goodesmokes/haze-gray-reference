@@ -101,7 +101,7 @@ test('all executable startup imports resolve to exact local project resources', 
 
 test('the shell contains every statically reachable local module and vendored runtime', async () => {
   const shell = await shellInventory();
-  assert.equal(shell.size, 45);
+  assert.equal(shell.size, 48);
   for (const file of reachableLocalModules()) assert(shell.has(file), file);
   assert(shell.has('js/pwa-register.mjs'));
   for (const [, file] of artifacts) assert(shell.has(file), file);

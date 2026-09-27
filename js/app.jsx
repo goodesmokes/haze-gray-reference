@@ -7,8 +7,11 @@ import { ROLE_LABELS, NO_PERMISSIONS, ROLE_PERMISSIONS, isValidRole, isActivePro
 import { normalizeRetailerName, validRetailerId } from "./js/domain/retailers.mjs";
 import { nonnegativeMoney, isReadableSavedOrder, buildReorderPlan, mergeReorderItems } from "./js/domain/saved-orders.mjs";
 import { newSizeRow, SEED_CIGARS, EMPTY_FORM, PACK_OPTIONS } from "./js/domain/catalog-data.mjs";
+import { createCatalogSnapshot, isTrustedCatalogEvent } from "./js/domain/catalog-snapshot.mjs";
 import { db, auth } from "./js/services/firebase.mjs";
 import { subscribeCatalog, isLegacyCatalogMigrationAvailable, saveCatalogRecord, deleteCatalogRecord, readLegacyCatalog } from "./js/services/catalog-service.mjs";
+import { loadCatalogSnapshot, replaceCatalogSnapshot } from "./js/services/catalog-snapshot-store.mjs";
+import { requestCatalogImageCache } from "./js/services/catalog-image-cache.mjs";
 import { subscribeAssignmentProfiles, subscribeRetailerDirectory } from "./js/services/retailer-service.mjs";
 import { saveAuthorizationProfile as saveAuthorizationProfileService } from "./js/services/profile-service.mjs";
 import { signInWithEmail, signOutUser, subscribeAuthState } from "./js/services/auth-service.mjs";
@@ -104,6 +107,8 @@ function useRetailerDirectory(user, profile, enabled) {
 function HazeGrayReference() {
   const [cigars, setCigars] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [catalogStatus, setCatalogStatus] = useState("loading");
+  const [catalogConfirmedAt, setCatalogConfirmedAt] = useState("");
   const [error, setError] = useState("");
   const [selectedId, setSelectedId] = useState(null);
   const [query, setQuery] = useState("");
@@ -673,6 +678,35 @@ const openOrderFromCompare = (cigarId) => {
   };
 
   useEffect(() => {
+    let active = true;
+    let storageReady = false;
+    let durableSnapshot = null;
+    let serverConfirmed = false;
+    let listenerFailure = null;
+
+    loadCatalogSnapshot().then((snapshot) => {
+      storageReady = true;
+      durableSnapshot = snapshot;
+      if (!active || serverConfirmed) return;
+      if (snapshot) {
+        setCigars(snapshot.records);
+        setCatalogConfirmedAt(snapshot.serverConfirmedAt);
+        setCatalogStatus(listenerFailure || globalThis.navigator?.onLine === false ? "cached" : "updating");
+        setLoading(false);
+        requestCatalogImageCache(snapshot.records, { authoritative: false });
+      } else if (listenerFailure || globalThis.navigator?.onLine === false) {
+        setCatalogStatus("unavailable");
+        setLoading(false);
+      }
+    }).catch(() => {
+      storageReady = true;
+      if (!active || serverConfirmed) return;
+      if (listenerFailure) {
+        setCatalogStatus("unavailable");
+        setLoading(false);
+      }
+    });
+
     (async () => {
       try {
         if (await isLegacyCatalogMigrationAvailable()) setCanMigrate(true);
@@ -682,16 +716,51 @@ const openOrderFromCompare = (cigarId) => {
     })();
 
     const unsubscribe = subscribeCatalog(
-      (list) => {
-        setCigars(list);
+      async (event) => {
+        if (!active) return;
+        if (!isTrustedCatalogEvent(event)) {
+          if (storageReady && !durableSnapshot && !serverConfirmed && event?.metadata?.fromCache === true && globalThis.navigator?.onLine === false) {
+            setCatalogStatus("unavailable");
+            setLoading(false);
+          }
+          return;
+        }
+        let snapshot;
+        try {
+          snapshot = createCatalogSnapshot(event);
+        } catch (catalogError) {
+          setError("Could not validate the public catalog. (" + catalogError.message + ")");
+          if (storageReady && !durableSnapshot) {
+            setCatalogStatus("unavailable");
+            setLoading(false);
+          }
+          return;
+        }
+        serverConfirmed = true;
+        setCigars(snapshot.records);
+        setCatalogConfirmedAt(snapshot.serverConfirmedAt);
+        setCatalogStatus("live");
         setLoading(false);
+        requestCatalogImageCache(snapshot.records, { authoritative: true });
+        try {
+          await replaceCatalogSnapshot(snapshot);
+          durableSnapshot = snapshot;
+        } catch (storageError) {
+          // Live catalog use remains available when browser storage is unavailable.
+          console.warn("Could not store the offline catalog snapshot:", storageError);
+        }
       },
       (e) => {
+        if (!active) return;
+        listenerFailure = e;
         setError("Could not reach the database. (" + e.message + ")");
-        setLoading(false);
+        if (storageReady) {
+          setCatalogStatus(durableSnapshot || serverConfirmed ? "cached" : "unavailable");
+          setLoading(false);
+        }
       }
     );
-    return () => unsubscribe();
+    return () => { active = false; unsubscribe(); };
   }, []);
 
   const openAdd = () => { if (!requirePermission("canEditCatalog")) return; setForm(EMPTY_FORM); setEditingId(null); setFormOpen(true); };
@@ -814,6 +883,14 @@ const openOrderFromCompare = (cigarId) => {
     return names.map((name) => ({ name, items: groups[name] }));
   })();
 
+  const catalogStatusText = catalogStatus === "updating"
+    ? "Updating catalog…"
+    : catalogStatus === "cached"
+      ? `Offline catalog${catalogConfirmedAt ? ` · last updated ${new Date(catalogConfirmedAt).toLocaleString()}` : ""}`
+      : catalogStatus === "unavailable"
+        ? "Catalog unavailable offline"
+        : "";
+
   return (
     <div style={{
       minHeight: "100%", background: "#14161A",
@@ -922,6 +999,12 @@ const openOrderFromCompare = (cigarId) => {
         </div>
       )}
 
+      {catalogStatusText && (
+        <div role="status" style={{ margin: "10px 24px 0", color: catalogStatus === "unavailable" ? "#d98a7c" : "#8A93A0", fontFamily: "'Oswald', sans-serif", fontSize: 12, letterSpacing: 0.5 }}>
+          {catalogStatusText}
+        </div>
+      )}
+
       {showRetailers && permissions.canUseRetailers ? (
         <RetailerDirectory key={`${user.uid}:${userProfile.role}`} directory={directory} repDirectory={repDirectory} selectedId={selectedRetailerId} onSelect={setSelectedRetailerId} user={user} profile={userProfile} permissions={permissions} draft={activeDraft} requirePermission={requirePermission} onStartOrder={startRetailerOrder} onHistory={openOrderHistory} onClose={() => setShowRetailers(false)} hasMeaningfulDraft={hasMeaningfulDraft} savedOrderDate={savedOrderDate} />
       ) : showOrderHistory && canUseOrderBuilder ? (
@@ -930,7 +1013,11 @@ const openOrderFromCompare = (cigarId) => {
         <AuthorizedUsers key={user.uid} currentUid={user.uid} managerProfile={userProfile} requirePermission={requirePermission} onSave={saveAuthorizationProfile} onClose={() => { setShowAuthorizedUsers(false); setShowCompare(false); setSelectedId(null); }} />
       ) : loading ? (
         <div style={{ padding: 40, fontFamily: "'Oswald', sans-serif", color: "#8A93A0" }}>Loading manifest…</div>
-) : showFinalReview && canUseFinalReview ? (
+      ) : catalogStatus === "unavailable" && cigars.length === 0 ? (
+        <div style={{ maxWidth: 900, margin: "0 auto", padding: "40px 24px", fontFamily: "'Oswald', sans-serif", color: "#C9CFD6" }}>
+          Catalog unavailable offline — connect once to prepare it.
+        </div>
+      ) : showFinalReview && canUseFinalReview ? (
         <FinalReview draft={activeDraft} user={user} userProfile={userProfile} cigars={cigars} packOptions={PACK_OPTIONS} requirePermission={requirePermission} orderWholesaleTotal={orderWholesaleTotal} copyConfirmed={copyConfirmed} onBack={() => setShowFinalReview(false)} onContinue={openOrderBuilder} onStartNew={() => { clearOrder(); openOrderBuilder(); }} onEmail={emailFinalOrder} onCopy={copyFinalOrder} />
 ) : showOrderBuilder && canUseOrderBuilder ? (
         <OrderBuilder draft={activeDraft} directory={directory} cigars={cigars} packOptions={PACK_OPTIONS} compareOrderId={compareOrderId} orderWholesaleTotal={orderWholesaleTotal} orderRetailTotal={orderRetailTotal} orderGrossProfit={orderGrossProfit} orderMarginPct={orderMarginPct} canUseFinalReview={canUseFinalReview} copyConfirmed={copyConfirmed} requirePermission={requirePermission} onClose={() => setShowOrderBuilder(false)} onSelectRetailer={selectOrderRetailer} onRetailerNameChange={setOrderRetailer} onRetailerEmailChange={setOrderEmail} onNotesChange={setOrderNotes} onAdd={addToOrder} onSetQuantity={setOrderQty} onRemove={removeOrderItem} onEmail={emailOrder} onCopy={copyOrderText} onFinalReview={openFinalReview} onClear={clearOrder} />

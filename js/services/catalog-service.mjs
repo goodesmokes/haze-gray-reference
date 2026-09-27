@@ -10,7 +10,15 @@ export function createCatalogService(database, api = FIRESTORE_API) {
 
   const subscribeCatalog = (onRecords, onError) => api.onSnapshot(
     cigarsCollection,
-    (snapshot) => onRecords(snapshot.docs.map((item) => ({ ...item.data(), id: item.id }))),
+    { includeMetadataChanges: true },
+    (snapshot) => onRecords({
+      complete: true,
+      records: snapshot.docs.map((item) => ({ ...item.data(), id: item.id })),
+      metadata: {
+        fromCache: snapshot.metadata.fromCache,
+        hasPendingWrites: snapshot.metadata.hasPendingWrites
+      }
+    }),
     onError
   );
 

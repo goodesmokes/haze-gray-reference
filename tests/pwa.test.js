@@ -21,10 +21,11 @@ const shellFiles = [
   'js/components/retailer-directory.mjs', 'js/components/retailer-editors.mjs',
   'js/components/save-order-panel.mjs', 'js/domain/assignments.mjs',
   'js/domain/authorization.mjs', 'js/domain/catalog-data.mjs',
-  'js/domain/catalog-images.mjs', 'js/domain/pricing.mjs',
+  'js/domain/catalog-images.mjs', 'js/domain/catalog-snapshot.mjs', 'js/domain/pricing.mjs',
   'js/domain/retailers.mjs', 'js/domain/saved-orders.mjs',
   'js/domain/territories.mjs', 'js/services/auth-service.mjs',
-  'js/services/catalog-service.mjs', 'js/services/firebase.mjs',
+  'js/services/catalog-image-cache.mjs', 'js/services/catalog-service.mjs',
+  'js/services/catalog-snapshot-store.mjs', 'js/services/firebase.mjs',
   'js/services/order-service.mjs', 'js/services/profile-service.mjs',
   'js/services/retailer-service.mjs', 'js/ui/styles.mjs',
   'vendor/babel/7.24.7/babel.min.js', 'vendor/react/18.3.1/react.mjs',
@@ -36,29 +37,39 @@ const shellFiles = [
   'vendor/firebase/10.12.2/firebase-firestore.js'
 ];
 const shell = shellFiles.map(name => scope + name);
-const cacheName = 'haze-gray-reference-pwa-shell-v2';
+const cacheName = 'haze-gray-reference-pwa-shell-v3';
+const imageCacheName = 'haze-gray-reference-catalog-images-v1';
 
-function worker({ network = async () => new Response('network'), entries = new Map(), names = [], installFailure = false } = {}) {
-  const handlers = new Map(), opened = [], deleted = [], added = [], fetched = [];
-  const cache = {
+function worker({ network = async () => new Response('network'), entries = new Map(), imageEntries = new Map(), names = [], installFailure = false, imageOpenFailure = false } = {}) {
+  const handlers = new Map(), opened = [], deleted = [], added = [], fetched = [], puts = [], imageDeletes = [];
+  const shellCache = {
     addAll: async requests => {
       added.push(...requests);
       if (installFailure) throw new Error('install unavailable');
     },
     match: async request => entries.get(new URL(typeof request === 'string' ? request : request.url, origin).pathname)
   };
+  const imageCache = {
+    match: async request => imageEntries.get(new URL(typeof request === 'string' ? request : request.url, origin).pathname)?.clone(),
+    put: async (request, response) => { const pathname = new URL(request.url, origin).pathname; puts.push(pathname); imageEntries.set(pathname, response); },
+    keys: async () => [...imageEntries.keys()].map(pathname => new Request(origin + pathname)),
+    delete: async request => { const pathname = new URL(request.url, origin).pathname; imageDeletes.push(pathname); return imageEntries.delete(pathname); }
+  };
   vm.runInNewContext(read('sw.js'), {
     URL, Request, Response,
     self: { location: { origin }, addEventListener: (name, fn) => handlers.set(name, fn), skipWaiting: () => assert.fail('forced activation'), clients: { claim: () => assert.fail('forced control') } },
-    caches: { open: async name => { opened.push(name); return cache; }, keys: async () => names, delete: async name => { deleted.push(name); return true; } },
+    caches: { open: async name => { opened.push(name); if (name === imageCacheName && imageOpenFailure) throw new Error('image cache unavailable'); return name === imageCacheName ? imageCache : shellCache; }, keys: async () => names, delete: async name => { deleted.push(name); return true; } },
     fetch: async request => { fetched.push(request.url); return network(request); }
   });
   return {
-    handlers, opened, deleted, added, fetched,
+    handlers, opened, deleted, added, fetched, puts, imageDeletes, imageEntries,
     lifecycle: name => { let result; handlers.get(name)({ waitUntil: promise => { result = promise; } }); return result; },
+    message: data => { let result; handlers.get('message')({ data, waitUntil: promise => { result = promise; } }); return result; },
     request: (url, mode = 'cors', method = 'GET') => {
       let response;
-      handlers.get('fetch')({ request: { url: new URL(url, origin).href, mode, method }, respondWith: promise => { response = promise; } });
+      const href = new URL(url, origin).href;
+      const request = mode === 'navigate' ? { url: href, mode, method } : new Request(href, { method });
+      handlers.get('fetch')({ request, respondWith: promise => { response = promise; } });
       return response;
     }
   };
@@ -123,7 +134,7 @@ test('registration is scoped, nonblocking, feature-detected and never reloads a 
   assert.equal(failed.warnings.length, 1);
 });
 
-test('install atomically caches the complete 45-resource local executable shell', async () => {
+test('install atomically caches the complete 48-resource local executable shell', async () => {
   const app = worker();
   await app.lifecycle('install');
   assert.deepEqual(app.opened, [cacheName]);
@@ -141,10 +152,10 @@ test('install atomically caches the complete 45-resource local executable shell'
 test('activation deletes only older Haze Gray PWA caches without taking over active clients', async () => {
   const oldFoundation = 'haze-gray-reference-pwa-foundation-v1';
   const oldShell = 'haze-gray-reference-pwa-shell-v1';
-  const app = worker({ names: [oldFoundation, oldShell, cacheName, 'another-app-v1', 'haze-gray-reference-catalog-v1'] });
+  const app = worker({ names: [oldFoundation, oldShell, 'haze-gray-reference-pwa-shell-v2', cacheName, 'another-app-v1', 'haze-gray-reference-catalog-v1', imageCacheName] });
   await app.lifecycle('activate');
-  assert.deepEqual(app.deleted, [oldFoundation, oldShell]);
-  assert.deepEqual([...app.handlers.keys()], ['install', 'activate', 'fetch']);
+  assert.deepEqual(app.deleted, [oldFoundation, oldShell, 'haze-gray-reference-pwa-shell-v2']);
+  assert.deepEqual([...app.handlers.keys()], ['install', 'activate', 'message', 'fetch']);
 });
 
 test('controlled root and index navigation stay on the cached shell version', async () => {
@@ -161,10 +172,13 @@ test('controlled root and index navigation stay on the cached shell version', as
 
 test('static-resource failures never receive the cached index document', async () => {
   const app = worker({ network: async () => { throw new Error('offline'); }, entries: new Map([[scope + 'index.html', new Response('shell')]]) });
-  for (const resource of ['js/missing.mjs', 'assets/cigars/missing.webp', 'missing.webmanifest', 'assets/icons/missing.png']) {
+  for (const resource of ['js/missing.mjs', 'missing.webmanifest', 'assets/icons/missing.png']) {
     assert.equal(app.request(scope + resource), undefined);
     assert.equal(app.request(scope + resource, 'navigate'), undefined);
   }
+  const missingImage = await app.request(scope + 'assets/cigars/missing.webp');
+  assert.equal(missingImage.status, 0);
+  assert.notEqual(await missingImage.text(), 'shell');
   for (const resource of ['manifest.webmanifest', 'assets/icons/icon-192.png', 'js/pwa-register.mjs', 'js/app.jsx', 'vendor/react/18.3.1/react.mjs']) {
     await assert.rejects(app.request(scope + resource), /offline/);
     assert.equal(app.request(scope + resource, 'navigate'), undefined);
@@ -189,4 +203,87 @@ test('cached static responses are exact resources and misses do not populate a r
   assert.deepEqual(app.fetched, []);
   assert.equal(await (await app.request(scope + 'assets/icons/icon-192.png')).text(), 'network');
   assert.deepEqual(app.added, []);
+});
+
+test('catalog image messages accept only exact same-origin cigar WebP paths without shell changes', async () => {
+  const future = scope + 'assets/cigars/Future_2027.webp';
+  const app = worker({ network: async () => new Response('image', { status: 200, headers: { 'content-type': 'image/webp' } }) });
+  await app.message({
+    type: 'haze-gray-reference:catalog-images',
+    authoritative: false,
+    paths: [
+      future, future,
+      'https://example.com/haze-gray-reference/assets/cigars/remote.webp',
+      scope + 'assets/cigars/query.webp?version=2',
+      scope + 'assets/cigars/fragment.webp#old',
+      scope + 'assets/cigars/%2e%2e/private.webp',
+      scope + 'assets/cigars/nested/image.webp',
+      scope + 'assets/icons/icon-192.webp',
+      scope + 'assets/cigars/not-webp.png'
+    ]
+  });
+  assert.deepEqual(app.fetched.map(url => new URL(url).pathname), [future]);
+  assert.deepEqual(app.puts, [future]);
+  assert.equal(shell.includes(future), false);
+});
+
+test('authoritative image synchronization revalidates desired images and removes only obsolete catalog images', async () => {
+  const keep = scope + 'assets/cigars/shared.webp';
+  const obsolete = scope + 'assets/cigars/obsolete.webp';
+  const entries = new Map([
+    [keep, new Response('old', { headers: { 'content-type': 'image/webp' } })],
+    [obsolete, new Response('obsolete', { headers: { 'content-type': 'image/webp' } })]
+  ]);
+  const app = worker({
+    imageEntries: entries,
+    network: async () => new Response('new', { status: 200, headers: { 'content-type': 'image/webp' } })
+  });
+  await app.message({ type: 'haze-gray-reference:catalog-images', authoritative: true, paths: [keep, keep] });
+  assert.deepEqual(app.fetched.map(url => new URL(url).pathname), [keep]);
+  assert.deepEqual(app.puts, [keep]);
+  assert.deepEqual(app.imageDeletes, [obsolete]);
+  assert.equal(await entries.get(keep).text(), 'new');
+  assert.equal(entries.has(obsolete), false);
+});
+
+test('failed image revalidation preserves the old cache and still permits authoritative obsolete cleanup', async () => {
+  const keep = scope + 'assets/cigars/keep.webp';
+  const obsolete = scope + 'assets/cigars/obsolete.webp';
+  const entries = new Map([
+    [keep, new Response('old', { headers: { 'content-type': 'image/webp' } })],
+    [obsolete, new Response('obsolete', { headers: { 'content-type': 'image/webp' } })]
+  ]);
+  const app = worker({ imageEntries: entries, network: async () => { throw new Error('offline'); } });
+  await app.message({ type: 'haze-gray-reference:catalog-images', authoritative: true, paths: [keep] });
+  assert.equal(await entries.get(keep).text(), 'old');
+  assert.equal(entries.has(obsolete), false);
+  assert.deepEqual(app.puts, []);
+  assert.deepEqual(app.imageDeletes, [obsolete]);
+});
+
+test('catalog image requests use fresh valid images and fall back to the last cached image', async () => {
+  const image = scope + 'assets/cigars/replace.webp';
+  const entries = new Map([[image, new Response('old', { headers: { 'content-type': 'image/webp' } })]]);
+  const updated = worker({ imageEntries: entries, network: async () => new Response('new', { status: 200, headers: { 'content-type': 'image/webp' } }) });
+  assert.equal(await (await updated.request(image)).text(), 'new');
+  assert.equal(await entries.get(image).text(), 'new');
+  assert.deepEqual(updated.puts, [image]);
+
+  const fallbackEntries = new Map([[image, new Response('old', { headers: { 'content-type': 'image/webp' } })]]);
+  const offline = worker({ imageEntries: fallbackEntries, network: async () => { throw new Error('offline'); } });
+  assert.equal(await (await offline.request(image)).text(), 'old');
+  assert.equal(await fallbackEntries.get(image).text(), 'old');
+  assert.deepEqual(offline.puts, []);
+});
+
+test('catalog image-cache failure does not affect atomic shell installation or network image delivery', async () => {
+  const image = scope + 'assets/cigars/cache-failure.webp';
+  const app = worker({
+    imageOpenFailure: true,
+    network: async () => new Response('network-image', { status: 200, headers: { 'content-type': 'image/webp' } })
+  });
+  await app.lifecycle('install');
+  assert.equal(app.added.length, shell.length);
+  await app.message({ type: 'haze-gray-reference:catalog-images', authoritative: true, paths: [image] });
+  assert.equal(await (await app.request(image)).text(), 'network-image');
 });

@@ -7,8 +7,8 @@ const createFakeApi = () => {
   const api = {
     collection: (_db, ...segments) => ({ path: segments.join('/') }),
     doc: (_db, ...segments) => ({ path: segments.join('/') }),
-    onSnapshot: (reference, onRecords, onError) => {
-      const subscription = { reference, onRecords, onError, stopped: false };
+    onSnapshot: (reference, options, onRecords, onError) => {
+      const subscription = { reference, options, onRecords, onError, stopped: false };
       state.snapshots.push(subscription);
       return () => { subscription.stopped = true; };
     },
@@ -32,14 +32,19 @@ test('catalog service preserves collection paths, subscription mapping and error
   const unsubscribe = service.subscribeCatalog((value) => { records = value; }, (error) => { failure = error; });
   assert.equal(typeof unsubscribe, 'function');
   assert.equal(state.snapshots[0].reference.path, 'cigars');
-  state.snapshots[0].onRecords({ docs: [
+  assert.deepEqual(state.snapshots[0].options, { includeMetadataChanges: true });
+  state.snapshots[0].onRecords({ metadata: { fromCache: false, hasPendingWrites: false }, docs: [
     { id: 'one', data: () => ({ name: 'First', imageUrl: '/haze-gray-reference/assets/cigars/1982.webp' }) },
     { id: 'two', data: () => ({ id: 'stored-id', name: 'Second' }) }
   ] });
-  assert.deepEqual(records, [
-    { name: 'First', imageUrl: '/haze-gray-reference/assets/cigars/1982.webp', id: 'one' },
-    { id: 'two', name: 'Second' }
-  ]);
+  assert.deepEqual(records, {
+    complete: true,
+    metadata: { fromCache: false, hasPendingWrites: false },
+    records: [
+      { name: 'First', imageUrl: '/haze-gray-reference/assets/cigars/1982.webp', id: 'one' },
+      { id: 'two', name: 'Second' }
+    ]
+  });
   const expectedError = new Error('listener failed');
   state.snapshots[0].onError(expectedError);
   assert.equal(failure, expectedError);
