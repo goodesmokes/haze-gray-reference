@@ -26,7 +26,7 @@ test('Order History keeps its account, role and retailer-scope remount boundary 
 test('Order History preserves manager/creator subscription scope, cleanup and late-callback suppression', () => {
   assert.match(history, /const allOrders = getProfilePermissions\(profile\)\.canManageUsers/);
   assert.match(history, /subscribeOrderHistory\(\{ allOrders, uid: user\.uid \}, \(readable, malformedCount\) => \{/);
-  assert.equal((history.match(/if \(!active\) return;/g) || []).length, 2, 'both success and error callbacks stay guarded');
+  assert.equal((history.match(/if \(!active\) return;/g) || []).length, 3, 'success, error, and unavailable callbacks stay guarded');
   assert.match(history, /setHistoryError\(malformedCount \? "Some saved records contain malformed data and cannot be displayed\. The stored records have not been changed\." : ""\)/);
   assert.match(history, /setHistoryError\(`Could not load order history: \$\{error\.message\}`\)/);
   assert.match(history, /return \(\) => \{ active = false; stop\(\); \}/);

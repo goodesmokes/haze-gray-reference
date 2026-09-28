@@ -26,7 +26,7 @@ function fakeApi(options = {}) {
     where: (...args) => ({ type: 'where', args }),
     orderBy: (...args) => ({ type: 'orderBy', args }),
     query: (reference, ...constraints) => ({ type: 'query', reference, constraints }),
-    onSnapshot: (scope, success, error) => { options.subscription = { scope, success, error, stopped: false }; return () => { options.subscription.stopped = true; }; },
+    onSnapshot: (scope, metadataOptions, success, error) => { options.subscription = { scope, metadataOptions, success, error, stopped: false }; return () => { options.subscription.stopped = true; }; },
     serverTimestamp: () => timestamp,
     runTransaction: async (_db, operation) => {
       const transaction = {
@@ -52,6 +52,7 @@ test('history subscription preserves manager and creator query scopes', async ()
     const unsubscribe = service.subscribeOrderHistory({ allOrders, uid: 'rep' }, () => {}, () => {});
     assert.equal(typeof unsubscribe, 'function');
     assert.equal(options.subscription.scope.reference.path, 'orders');
+    assert.deepEqual(options.subscription.metadataOptions, { includeMetadataChanges: true });
     assert.deepEqual(options.subscription.scope.constraints, allOrders
       ? [{ type: 'orderBy', args: ['savedAt', 'desc'] }]
       : [{ type: 'where', args: ['creatorUid', '==', 'rep'] }, { type: 'orderBy', args: ['savedAt', 'desc'] }]);
@@ -71,7 +72,7 @@ test('history subscription maps snapshots, preserves timestamps and excludes pen
   let result;
   let failure;
   service.subscribeOrderHistory({ allOrders: false, uid: 'rep' }, (records, malformedCount) => { result = { records, malformedCount }; }, (error) => { failure = error; });
-  options.subscription.success({ docs: [
+  options.subscription.success({ metadata: { fromCache: false, hasPendingWrites: false }, docs: [
     { id: 'valid', metadata: { hasPendingWrites: false }, data: () => valid },
     { id: 'pending', metadata: { hasPendingWrites: true }, data: () => valid },
     { id: 'foreign', metadata: { hasPendingWrites: false }, data: () => ({ ...valid, creatorUid: 'other' }) },
@@ -84,6 +85,22 @@ test('history subscription maps snapshots, preserves timestamps and excludes pen
   const error = new Error('history failed');
   options.subscription.error(error);
   assert.equal(failure, error);
+});
+
+test('history subscription never presents cached or aggregate-pending query results as current', async () => {
+  const { createOrderService } = await importNativeModule('js/services/order-service.mjs');
+  const options = {}, { api } = fakeApi(options);
+  const records = [], unavailable = [];
+  createOrderService({ db: {}, auth: { currentUser: { uid: 'rep' } }, api }).subscribeOrderHistory(
+    { allOrders: false, uid: 'rep' },
+    (value) => records.push(value),
+    () => {},
+    (metadata) => unavailable.push(metadata)
+  );
+  options.subscription.success({ docs: [], metadata: { fromCache: true, hasPendingWrites: false } });
+  options.subscription.success({ docs: [], metadata: { fromCache: false, hasPendingWrites: true } });
+  assert.deepEqual(records, []);
+  assert.equal(unavailable.length, 2);
 });
 
 test('save transaction preserves read ordering, fresh profile authorization and server timestamp', async () => {

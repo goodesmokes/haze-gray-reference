@@ -82,6 +82,12 @@ export function AuthorizedUsers({ currentUid, managerProfile, requirePermission,
       setEditingUid(null);
       setUsersError("Could not load authorization profiles. (" + e.message + ")");
       setReady(true);
+    }, () => {
+      if (!listening) return;
+      setProfiles([]);
+      setEditingUid(null);
+      setUsersError("Authorization profiles require a current server connection.");
+      setReady(true);
     });
     return () => { listening = false; unsubscribe(); };
   }, [currentUid, requirePermission]);

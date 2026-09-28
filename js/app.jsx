@@ -35,6 +35,21 @@ const LOGO_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAPAAAADwCAI
 const ORDER_DRAFT_STORAGE_KEY = "haze-gray-cigars.order-draft.v2.";
 const orderDraftKey = (uid) => uid ? ORDER_DRAFT_STORAGE_KEY + uid : null;
 
+function browserIsOnline(navigatorValue = globalThis.navigator) {
+  return navigatorValue?.onLine !== false;
+}
+
+function confirmedProfileAccess(snapshot) {
+  if (!snapshot || snapshot.metadata.fromCache || snapshot.metadata.hasPendingWrites) {
+    return { confirmed: false, profile: null, permissions: NO_PERMISSIONS };
+  }
+  const profile = snapshot.exists() ? snapshot.data() : null;
+  const permissions = isActiveProfile(profile) && isValidRole(profile?.role)
+    ? getProfilePermissions(profile)
+    : NO_PERMISSIONS;
+  return { confirmed: true, profile, permissions };
+}
+
 function loadOrderDraft(uid) {
   if (!uid) return {};
   try {
@@ -82,7 +97,9 @@ function useAssignmentProfiles(user, enabled) {
     const stop = subscribeAssignmentProfiles((profiles) => {
       if (!live || auth.currentUser?.uid !== scope) return;
       setState({ scope, profiles, ready: true, error: "" });
-    }, (error) => { if (live && auth.currentUser?.uid === scope) setState({ scope, profiles: [], ready: true, error: "Could not load assignment profiles: " + error.message }); });
+    }, (error) => { if (live && auth.currentUser?.uid === scope) setState({ scope, profiles: [], ready: true, error: "Could not load assignment profiles: " + error.message }); }, () => {
+      if (live && auth.currentUser?.uid === scope) setState({ scope, profiles: [], ready: true, error: "Assignment profiles require a current server connection." });
+    });
     return () => { live = false; stop(); };
   }, [scope, retry]);
   return { ...(scope && state.scope === scope ? state : { profiles: [], ready: false, error: "" }), reload: () => setRetry((value) => value + 1) };
@@ -99,12 +116,16 @@ function useRetailerDirectory(user, profile, enabled) {
     const stop = subscribeRetailerDirectory(manager, (records) => {
       if (!live || auth.currentUser?.uid !== user.uid) return;
       setState({ scope, records, ready: true, error: "" });
-    }, (error) => { if (live) setState({ scope, records: [], ready: true, error: `Could not load retailers: ${error.message}` }); });
+    }, (error) => { if (live) setState({ scope, records: [], ready: true, error: `Could not load retailers: ${error.message}` }); }, () => {
+      if (live) setState({ scope, records: [], ready: true, error: "Retailers require a current server connection." });
+    });
     return () => { live = false; stop(); };
   }, [scope, retry]);
   return { ...(state.scope === scope ? state : { records: [], ready: false, error: "" }), reload: () => setRetry((value) => value + 1) };
 }
 function HazeGrayReference() {
+  const [browserOnline, setBrowserOnline] = useState(browserIsOnline);
+  const browserOnlineRef = useRef(browserOnline);
   const [cigars, setCigars] = useState([]);
   const [loading, setLoading] = useState(true);
   const [catalogStatus, setCatalogStatus] = useState("loading");
@@ -438,6 +459,10 @@ const openOrderFromCompare = (cigarId) => {
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState(EMPTY_FORM);
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+  const [catalogSaving, setCatalogSaving] = useState(false);
+  const [catalogDeleting, setCatalogDeleting] = useState(false);
+  const catalogSaveBusyRef = useRef(false);
+  const catalogDeleteBusyRef = useRef(false);
   const [user, setUser] = useState(null);
   const [authReady, setAuthReady] = useState(false);
   const [signInOpen, setSignInOpen] = useState(false);
@@ -448,22 +473,37 @@ const openOrderFromCompare = (cigarId) => {
   const [userProfile, setUserProfile] = useState(null);
   const [profileReady, setProfileReady] = useState(false);
   const [profileError, setProfileError] = useState("");
+  const [authorizationStatus, setAuthorizationStatus] = useState("signed-out");
   const [showAuthorizedUsers, setShowAuthorizedUsers] = useState(false);
   const accessRef = useRef({ uid: null, profile: null, permissions: NO_PERMISSIONS });
-  const isAuthorizedUser = Boolean(user && profileReady && isActiveProfile(userProfile));
+  const isAuthorizedUser = Boolean(browserOnline && user && authorizationStatus === "confirmed" && isActiveProfile(userProfile));
   const permissions = isAuthorizedUser ? getProfilePermissions(userProfile) : NO_PERMISSIONS;
   const { canEditCatalog, canEditPackages, canUseOrderBuilder, canUseFinalReview, canManageUsers, canMigrateLegacyData } = permissions;
   const directory = useRetailerDirectory(user, userProfile, permissions.canUseRetailers);
   const repDirectory = useAssignmentProfiles(user, showRetailers && permissions.canAssignRetailers);
   const activeDraft = { orderItems, orderRetailer, orderEmail, orderNotes, retailerId };
-  const clearProtectedDraft = () => {
+  const clearProtectedDraft = useCallback(() => {
     draftOwnerRef.current = null;
     setDraftUid(null);
     setRetailerId(""); setShowRetailers(false); setSelectedRetailerId(null); setHistoryRetailerId(null);
     setOrderItems([]); setOrderRetailer(""); setOrderEmail(""); setOrderNotes("");
     setShowOrderBuilder(false); setShowFinalReview(false); setShowOrderHistory(false);
     setCompareOrderId(null); setCopyConfirmed(false);
-  };
+  }, []);
+
+  useEffect(() => {
+    const updateConnectivity = () => {
+      const online = browserIsOnline();
+      browserOnlineRef.current = online;
+      setBrowserOnline(online);
+    };
+    globalThis.addEventListener?.("online", updateConnectivity);
+    globalThis.addEventListener?.("offline", updateConnectivity);
+    return () => {
+      globalThis.removeEventListener?.("online", updateConnectivity);
+      globalThis.removeEventListener?.("offline", updateConnectivity);
+    };
+  }, []);
   useEffect(() => {
     // Never persist a previous render's draft under a new account, or erase it during cleanup.
     if (!draftUid || draftOwnerRef.current !== draftUid || auth.currentUser?.uid !== draftUid ||
@@ -479,19 +519,14 @@ const openOrderFromCompare = (cigarId) => {
   // Read current access inside handlers, including async continuations and stale callbacks.
   const requirePermission = useCallback((permission) => {
     const access = accessRef.current;
-    if (access.uid && auth.currentUser?.uid === access.uid && access.permissions[permission] === true) return true;
+    if (browserOnlineRef.current && access.uid && auth.currentUser?.uid === access.uid && access.permissions[permission] === true) return true;
     setError("You are not authorized to perform this action.");
     return false;
   }, []);
 
   useEffect(() => {
-    let unsubscribeProfile = null;
-    let generation = 0;
     const unsub = subscribeAuthState((u) => {
-      const currentGeneration = ++generation;
       clearProtectedDraft();
-      if (unsubscribeProfile) unsubscribeProfile();
-      unsubscribeProfile = null;
       accessRef.current = { uid: u?.uid || null, profile: null, permissions: NO_PERMISSIONS };
       setFormOpen(false);
       setConfirmDeleteId(null);
@@ -500,20 +535,61 @@ const openOrderFromCompare = (cigarId) => {
       setShowAuthorizedUsers(false);
       setCompareOrderId(null);
       setUserProfile(null);
-      setProfileReady(!u);
+      setProfileReady(!u || !browserOnlineRef.current);
       setProfileError("");
+      setAuthorizationStatus(u ? (browserOnlineRef.current ? "checking" : "unavailable") : "signed-out");
       setUser(u);
       setAuthReady(true);
-      if (!u) return;
-      unsubscribeProfile = onSnapshot(doc(db, "users", u.uid), (snap) => {
-        if (currentGeneration !== generation) return;
-        const profile = snap.exists() ? snap.data() : null;
-        accessRef.current = { uid: u.uid, profile, permissions: getProfilePermissions(profile) };
-        if (!accessRef.current.permissions.canUseOrderBuilder) clearProtectedDraft();
-        else if (draftOwnerRef.current !== u.uid) {
-          const restored = loadOrderDraft(u.uid);
-          draftOwnerRef.current = u.uid;
-          setDraftUid(u.uid);
+    });
+    return () => { unsub(); accessRef.current = { uid: null, profile: null, permissions: NO_PERMISSIONS }; };
+  }, [clearProtectedDraft]);
+
+  useEffect(() => {
+    const uid = user?.uid;
+    accessRef.current = { uid: uid || null, profile: null, permissions: NO_PERMISSIONS };
+    clearProtectedDraft();
+    setUserProfile(null);
+    setProfileError("");
+    if (!uid) {
+      setProfileReady(true);
+      setAuthorizationStatus("signed-out");
+      return;
+    }
+    if (!browserOnline) {
+      setProfileReady(true);
+      setAuthorizationStatus("unavailable");
+      return;
+    }
+
+    let active = true;
+    let serverConfirmed = false;
+    setProfileReady(false);
+    setAuthorizationStatus("checking");
+    const unsubscribe = onSnapshot(
+      doc(db, "users", uid),
+      { includeMetadataChanges: true },
+      (snap) => {
+        if (!active || auth.currentUser?.uid !== uid) return;
+        const access = confirmedProfileAccess(snap);
+        if (!access.confirmed) {
+          accessRef.current = { uid, profile: null, permissions: NO_PERMISSIONS };
+          clearProtectedDraft();
+          setUserProfile(null);
+          if (serverConfirmed) {
+            setProfileReady(true);
+            setAuthorizationStatus("unavailable");
+            setProfileError("Protected access is unavailable until your profile can be confirmed by the server.");
+          }
+          return;
+        }
+        serverConfirmed = true;
+        const { profile, permissions: confirmedPermissions } = access;
+        accessRef.current = { uid, profile, permissions: confirmedPermissions };
+        if (!confirmedPermissions.canUseOrderBuilder) clearProtectedDraft();
+        else if (draftOwnerRef.current !== uid) {
+          const restored = loadOrderDraft(uid);
+          draftOwnerRef.current = uid;
+          setDraftUid(uid);
           setRetailerId(restored.retailerId || "");
           setOrderItems(restored.orderItems || []);
           setOrderRetailer(restored.orderRetailer || "");
@@ -522,18 +598,21 @@ const openOrderFromCompare = (cigarId) => {
         }
         setUserProfile(profile);
         setProfileReady(true);
+        setAuthorizationStatus("confirmed");
         setProfileError("");
-      }, (e) => {
-        if (currentGeneration !== generation) return;
-        accessRef.current = { uid: u.uid, profile: null, permissions: NO_PERMISSIONS };
+      },
+      (e) => {
+        if (!active) return;
+        accessRef.current = { uid, profile: null, permissions: NO_PERMISSIONS };
         clearProtectedDraft();
         setUserProfile(null);
         setProfileReady(true);
-        setProfileError("Could not load your authorization profile. (" + e.message + ")");
-      });
-    });
-    return () => { generation++; unsub(); if (unsubscribeProfile) unsubscribeProfile(); accessRef.current = { uid: null, profile: null, permissions: NO_PERMISSIONS }; };
-  }, []);
+        setAuthorizationStatus("unavailable");
+        setProfileError("Could not confirm your authorization profile. (" + e.message + ")");
+      }
+    );
+    return () => { active = false; unsubscribe(); };
+  }, [user?.uid, browserOnline, clearProtectedDraft]);
 
   useEffect(() => {
     if (!canEditCatalog) { setFormOpen(false); setConfirmDeleteId(null); }
@@ -612,6 +691,10 @@ const openOrderFromCompare = (cigarId) => {
 
   const handleSignIn = async () => {
     setSignInError("");
+    if (!browserOnline) {
+      setSignInError("Sign-in requires a network connection.");
+      return;
+    }
     setSigningIn(true);
     try {
       await signInWithEmail(signInEmail, signInPassword);
@@ -636,23 +719,37 @@ const openOrderFromCompare = (cigarId) => {
   const [canMigrate, setCanMigrate] = useState(false);
   const [migrating, setMigrating] = useState(false);
 
+  useEffect(() => {
+    setCanMigrate(false);
+    if (!browserOnline || !canMigrateLegacyData) return;
+    let active = true;
+    isLegacyCatalogMigrationAvailable()
+      .then((available) => { if (active) setCanMigrate(available); })
+      .catch(() => { /* The protected migration control stays unavailable. */ });
+    return () => { active = false; };
+  }, [browserOnline, canMigrateLegacyData, user?.uid]);
+
   const saveCigarDoc = useCallback(async (record) => {
-    if (!requirePermission("canEditCatalog")) return;
+    if (!requirePermission("canEditCatalog")) return false;
     try {
       await saveCatalogRecord(record);
       setError("");
+      return true;
     } catch (e) {
       setError("Save failed — your change may not persist. (" + e.message + ")");
+      return false;
     }
   }, [requirePermission]);
 
   const deleteCigarDoc = useCallback(async (id) => {
-    if (!requirePermission("canEditCatalog")) return;
+    if (!requirePermission("canEditCatalog")) return false;
     try {
       await deleteCatalogRecord(id);
       setError("");
+      return true;
     } catch (e) {
       setError("Delete failed. (" + e.message + ")");
+      return false;
     }
   }, [requirePermission]);
 
@@ -706,14 +803,6 @@ const openOrderFromCompare = (cigarId) => {
         setLoading(false);
       }
     });
-
-    (async () => {
-      try {
-        if (await isLegacyCatalogMigrationAvailable()) setCanMigrate(true);
-      } catch (e) {
-        // Non-fatal — the live listener below will still try to load the collection.
-      }
-    })();
 
     const unsubscribe = subscribeCatalog(
       async (event) => {
@@ -787,9 +876,10 @@ const openOrderFromCompare = (cigarId) => {
   const addSizeRow = () => { if (requirePermission("canEditPackages")) setForm((f) => ({ ...f, sizes: [...f.sizes, newSizeRow()] })); };
   const removeSizeRow = (idx) => { if (requirePermission("canEditPackages")) setForm((f) => ({ ...f, sizes: f.sizes.filter((_, i) => i !== idx) })); };
 
-  const saveForm = () => {
-    if (!requirePermission("canEditCatalog") || !requirePermission("canEditPackages")) return;
+  const saveForm = async () => {
+    if (catalogSaveBusyRef.current || !requirePermission("canEditCatalog") || !requirePermission("canEditPackages")) return;
     if (!form.name.trim()) return;
+    catalogSaveBusyRef.current = true;
     const cleanSizes = form.sizes
     .map((s) => {
   const msrp = s.msrp.trim();
@@ -825,24 +915,39 @@ const openOrderFromCompare = (cigarId) => {
   };
 })
       .filter((s) => s.vitola || s.dims || s.msrp || s.keystoneSingle || s.keystoneBox10 || s.keystoneBox20 || s.keystoneBundle20);
+    const recordId = editingId || `c-${Date.now()}`;
+    if (!editingId) setEditingId(recordId);
     const record = {
       ...form,
-      id: editingId || `c-${Date.now()}`,
+      id: recordId,
       strength: Number(form.strength) || 1,
       body: Number(form.body) || 1,
       tastingNotes: form.tastingNotes.split(",").map((s) => s.trim()).filter(Boolean),
       pairings: form.pairings.split(",").map((s) => s.trim()).filter(Boolean),
       sizes: cleanSizes,
     };
-    saveCigarDoc(record);
-    setFormOpen(false);
+    setCatalogSaving(true);
+    try {
+      if (await saveCigarDoc(record)) setFormOpen(false);
+    } finally {
+      catalogSaveBusyRef.current = false;
+      setCatalogSaving(false);
+    }
   };
 
-  const doDelete = (id) => {
-    if (!requirePermission("canEditCatalog")) return;
-    deleteCigarDoc(id);
-    setConfirmDeleteId(null);
-    if (selectedId === id) setSelectedId(null);
+  const doDelete = async (id) => {
+    if (catalogDeleteBusyRef.current || !requirePermission("canEditCatalog")) return;
+    catalogDeleteBusyRef.current = true;
+    setCatalogDeleting(true);
+    try {
+      if (await deleteCigarDoc(id)) {
+        setConfirmDeleteId(null);
+        if (selectedId === id) setSelectedId(null);
+      }
+    } finally {
+      catalogDeleteBusyRef.current = false;
+      setCatalogDeleting(false);
+    }
   };
 
   const filtered = cigars
@@ -889,6 +994,13 @@ const openOrderFromCompare = (cigarId) => {
       ? `Offline catalog${catalogConfirmedAt ? ` · last updated ${new Date(catalogConfirmedAt).toLocaleString()}` : ""}`
       : catalogStatus === "unavailable"
         ? "Catalog unavailable offline"
+        : "";
+  const connectivityStatusText = !browserOnline
+    ? "Offline — the public catalog remains available. Sign-in and protected tools require a connection."
+    : user && authorizationStatus === "checking"
+      ? "Connection restored — verifying protected access…"
+      : user && authorizationStatus === "unavailable"
+        ? "Signed in, but protected access could not be verified. Public catalog browsing remains available."
         : "";
 
   return (
@@ -977,7 +1089,7 @@ const openOrderFromCompare = (cigarId) => {
                 background: "none", border: "1px solid #6E7681", color: "#C9CFD6", borderRadius: 4,
                 padding: "10px 16px", fontFamily: "'Oswald', sans-serif", fontWeight: 500, letterSpacing: 1,
                 fontSize: 12.5, textTransform: "uppercase",
-              }}>
+              }} disabled={!browserOnline} title={!browserOnline ? "Sign-in requires a network connection." : undefined}>
                 Sign In to Edit
               </button>
             )
@@ -985,8 +1097,12 @@ const openOrderFromCompare = (cigarId) => {
         </div>
       </div>
 
-      {user && !profileReady && <div role="status" style={{ margin: "12px 24px", color: "#8A93A0", fontFamily: "'Oswald', sans-serif" }}>Checking authorization…</div>}
-      {user && profileReady && !isAuthorizedUser && (
+      {connectivityStatusText && (
+        <div role="status" style={{ margin: "12px 24px", padding: "10px 14px", border: "1px solid #6E7681", borderRadius: 4, color: "#C9CFD6", fontFamily: "'Oswald', sans-serif", fontSize: 13 }}>
+          {connectivityStatusText}
+        </div>
+      )}
+      {user && authorizationStatus === "confirmed" && profileReady && !isAuthorizedUser && (
         <div role="alert" style={{ margin: "12px 24px", padding: "10px 14px", border: "1px solid #A8402E", borderRadius: 4, color: "#EDE6D6", fontFamily: "'Oswald', sans-serif" }}>
           Your account is signed in but is not authorized to use protected Haze Gray features.
           {profileError && <div style={{ color: "#d98a7c", fontSize: 12, marginTop: 6 }}>{profileError}</div>}
@@ -1031,7 +1147,7 @@ const openOrderFromCompare = (cigarId) => {
 
       {/* ---------- ADD/EDIT FORM MODAL ---------- */}
       {formOpen && canEditCatalog && canEditPackages && (
-        <CatalogEditor form={form} editingId={editingId} onClose={() => setFormOpen(false)} onFormChange={setForm} onSetSizeField={setSizeField} onAddSize={addSizeRow} onRemoveSize={removeSizeRow} onSave={saveForm} />
+        <CatalogEditor form={form} editingId={editingId} saving={catalogSaving} onClose={() => { if (!catalogSaving) setFormOpen(false); }} onFormChange={setForm} onSetSizeField={setSizeField} onAddSize={addSizeRow} onRemoveSize={removeSizeRow} onSave={saveForm} />
       )}
 
       {/* ---------- SIGN IN MODAL ---------- */}
@@ -1069,7 +1185,8 @@ const openOrderFromCompare = (cigarId) => {
               />
             </div>
             {signInError && <div style={{ color: "#d98a7c", fontSize: 12.5, marginBottom: 12, fontFamily: "'Oswald', sans-serif" }}>{signInError}</div>}
-            <button className="hg-btn" onClick={handleSignIn} disabled={signingIn} style={{
+            {!browserOnline && <div style={{ color: "#d98a7c", fontSize: 12.5, marginBottom: 12, fontFamily: "'Oswald', sans-serif" }}>Sign-in requires a network connection.</div>}
+            <button className="hg-btn" onClick={handleSignIn} disabled={signingIn || !browserOnline} style={{
               width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
               background: "#B8894C", border: "none", color: "#14161A", borderRadius: 4,
               padding: "10px 16px", fontFamily: "'Oswald', sans-serif", fontWeight: 600, fontSize: 13,
@@ -1085,7 +1202,7 @@ const openOrderFromCompare = (cigarId) => {
         <div style={{
           position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex",
           alignItems: "center", justifyContent: "center", padding: 20, zIndex: 60,
-        }} onClick={() => setConfirmDeleteId(null)}>
+        }} onClick={() => { if (!catalogDeleting) setConfirmDeleteId(null); }}>
           <div onClick={(e) => e.stopPropagation()} style={{
             background: "#1c1f24", border: "1px solid #A8402E", borderRadius: 8, padding: 22, maxWidth: 360,
           }}>
@@ -1093,12 +1210,12 @@ const openOrderFromCompare = (cigarId) => {
               Delete this cigar from the reference list? This can't be undone.
             </div>
             <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
-              <button className="hg-btn" onClick={() => setConfirmDeleteId(null)} style={{
+              <button className="hg-btn" disabled={catalogDeleting} onClick={() => setConfirmDeleteId(null)} style={{
                 background: "none", border: "1px solid #454b53", color: "#C9CFD6", borderRadius: 4, padding: "8px 14px", fontFamily: "'Oswald', sans-serif", fontSize: 13,
               }}>Cancel</button>
-              <button className="hg-btn" onClick={() => doDelete(confirmDeleteId)} style={{
+              <button className="hg-btn" disabled={catalogDeleting} onClick={() => doDelete(confirmDeleteId)} style={{
                 background: "#A8402E", border: "none", color: "#EDE6D6", borderRadius: 4, padding: "8px 14px", fontFamily: "'Oswald', sans-serif", fontSize: 13,
-              }}>Delete</button>
+              }}>{catalogDeleting ? "Deleting…" : "Delete"}</button>
             </div>
           </div>
         </div>

@@ -82,16 +82,16 @@ test('linked snapshots, legacy orders, exact-ID history and immutable historic d
 test('directory subscriptions fail closed across account, role changes and errors',()=>{
  let state,callback,fail,stopped=0,cleanup;
  const auth={currentUser:{uid:'owner'}};
- const subscriptionApi={collection:()=>({}),query:()=>({}),where:()=>({}),onSnapshot:(_source,next,error)=>{callback=next;fail=error;return ()=>stopped++;}};
+ const subscriptionApi={collection:()=>({}),query:()=>({}),where:()=>({}),onSnapshot:(_source,_options,next,error)=>{callback=next;fail=error;return ()=>stopped++;}};
  const env={auth,getProfilePermissions:client.getProfilePermissions,subscribeRetailerDirectory:createRetailerService({db:{},auth,api:subscriptionApi}).subscribeRetailerDirectory,
  useState:initial=>[state===undefined?initial:state,value=>{state=value;}],
  useEffect:effect=>{cleanup=effect();}};
  const hook=Function(...Object.keys(env),'return '+text('useRetailerDirectory'))(...Object.values(env));
  hook({uid:'owner'},{role:'owner',active:true},true);
- callback({docs:[{id:'r1',data:()=>({name:'Private',nameNormalized:'private',active:true})}]});assert.equal(state.records.length,1);
+ callback({metadata:{fromCache:false,hasPendingWrites:false},docs:[{id:'r1',data:()=>({name:'Private',nameNormalized:'private',active:true})}]});assert.equal(state.records.length,1);
  const old=callback;cleanup();auth.currentUser={uid:'rep'};
  const next=hook({uid:'rep'},{role:'field_rep',active:true},true);assert.deepEqual(next.records,[]);
- old({docs:[{id:'old',data:()=>({name:'Old',nameNormalized:'old',active:true})}]});assert.deepEqual(state.records,[]);
+ old({metadata:{fromCache:false,hasPendingWrites:false},docs:[{id:'old',data:()=>({name:'Old',nameNormalized:'old',active:true})}]});assert.deepEqual(state.records,[]);
  fail(new Error('denied'));assert.deepEqual(state.records,[]);assert.match(state.error,/denied/);
  cleanup();auth.currentUser=null;hook(null,null,false);assert.deepEqual(state.records,[]);assert.equal(stopped,2);
 });

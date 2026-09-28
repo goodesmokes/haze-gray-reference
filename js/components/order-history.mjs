@@ -33,6 +33,10 @@ export function OrderHistory({ user, profile, cigars, packOptions, draft, requir
       if (!active) return;
       setOrders([]); setSelectedOrderId(null); setReview(false); setReady(true);
       setHistoryError(`Could not load order history: ${error.message}`);
+    }, () => {
+      if (!active) return;
+      setOrders([]); setSelectedOrderId(null); setReview(false); setReady(true);
+      setHistoryError("Order history requires a current server connection.");
     });
     return () => { active = false; stop(); };
   }, [user.uid, allOrders, retry, requirePermission]);

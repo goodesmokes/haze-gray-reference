@@ -56,6 +56,16 @@ test('sign-out targets the injected Auth instance', async () => {
   assert.deepEqual(fixture.calls, [{ operation: 'signOut', auth: authentication }]);
 });
 
+test('offline sign-in is rejected before Firebase while sign-out remains available', async () => {
+  const { createAuthService } = await importNativeModule('js/services/auth-service.mjs');
+  const fixture = createFixture();
+  const service = createAuthService({ auth: {}, api: fixture.api, isOnline: () => false });
+  await assert.rejects(service.signInWithEmail('user@example.test', 'secret'), /network connection/);
+  assert.deepEqual(fixture.calls, []);
+  await service.signOutUser();
+  assert.deepEqual(fixture.calls.map(({ operation }) => operation), ['signOut']);
+});
+
 test('Auth-state subscription forwards callbacks and the Firebase unsubscribe function', async () => {
   const { createAuthService } = await importNativeModule('js/services/auth-service.mjs');
   const fixture = createFixture();
@@ -91,8 +101,8 @@ test('index imports Auth primitives while retaining lifecycle and UI error owner
   assert.match(signOutSource, /await signOutUser\(\)/);
   assert.match(signOutSource, /catch \(e\)/);
 
-  assert.match(source, /let generation = 0/);
-  assert.match(source, /const currentGeneration = \+\+generation/);
-  assert.match(source, /if \(currentGeneration !== generation\) return/);
-  assert.match(source, /return \(\) => \{ generation\+\+; unsub\(\); if \(unsubscribeProfile\) unsubscribeProfile\(\)/);
+  assert.match(source, /authorizationStatus === "confirmed"/);
+  assert.match(source, /\{ includeMetadataChanges: true \}/);
+  assert.match(source, /const access = confirmedProfileAccess\(snap\)/);
+  assert.match(source, /accessRef\.current = \{ uid, profile: null, permissions: NO_PERMISSIONS \}/);
 });

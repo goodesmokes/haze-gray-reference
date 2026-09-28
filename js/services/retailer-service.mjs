@@ -7,7 +7,10 @@ import { auth, db } from "./firebase.mjs";
 
 const FIRESTORE_API = { collection, doc, getDocs, onSnapshot, query, runTransaction, serverTimestamp, where };
 
-export function createRetailerService({ db: database, auth: authentication, api = FIRESTORE_API }) {
+export function createRetailerService({ db: database, auth: authentication, api = FIRESTORE_API, isOnline = () => globalThis.navigator?.onLine !== false }) {
+  const requireOnline = () => {
+    if (!isOnline()) throw new Error("This retailer operation requires a network connection.");
+  };
   const checkNewRepAssignments = async (transaction, next, previous) => {
     validateRepAssignments(next);
     for (const uid of next.filter((id) => !previous.includes(id))) {
@@ -17,6 +20,7 @@ export function createRetailerService({ db: database, auth: authentication, api 
   };
 
   const saveRetailerAssignments = async (id, next, expected, uid, requirePermission) => {
+    requireOnline();
     const permitted = () => authentication.currentUser?.uid === uid && requirePermission("canAssignRetailers");
     if (!permitted()) throw new Error("You are not authorized to change retailer assignments.");
     validateRepAssignments(next);
@@ -34,6 +38,7 @@ export function createRetailerService({ db: database, auth: authentication, api 
   };
 
   const saveRetailerProfile = async (id, input, uid, requirePermission) => {
+    requireOnline();
     const permitted = () => authentication.currentUser?.uid === uid && requirePermission("canUseRetailers");
     if (!permitted()) throw new Error("You are not authorized to manage retailers.");
     const data = validateRetailer(input);
@@ -74,26 +79,47 @@ export function createRetailerService({ db: database, auth: authentication, api 
     return ref.id;
   };
 
-  const subscribeAssignmentProfiles = (onProfiles, onError) => api.onSnapshot(
+  const subscribeAssignmentProfiles = (onProfiles, onError, onUnavailable = () => {}) => {
+    if (!isOnline()) {
+      onUnavailable({ offline: true, fromCache: true, hasPendingWrites: false });
+      return () => {};
+    }
+    return api.onSnapshot(
     api.collection(database, "users"),
+    { includeMetadataChanges: true },
     (snapshot) => {
+      const metadata = { fromCache: snapshot.metadata.fromCache, hasPendingWrites: snapshot.metadata.hasPendingWrites };
+      if (metadata.fromCache || metadata.hasPendingWrites) {
+        onUnavailable(metadata);
+        return;
+      }
       const profiles = snapshot.docs.map((item) => ({ ...item.data(), uid: item.id }));
       profiles.sort((a, b) => String(a.displayName || a.uid).localeCompare(String(b.displayName || b.uid)));
-      onProfiles(profiles);
+      onProfiles(profiles, metadata);
     },
     onError
   );
+  };
 
-  const subscribeRetailerDirectory = (manager, onRecords, onError) => {
+  const subscribeRetailerDirectory = (manager, onRecords, onError, onUnavailable = () => {}) => {
+    if (!isOnline()) {
+      onUnavailable({ offline: true, fromCache: true, hasPendingWrites: false });
+      return () => {};
+    }
     const source = manager
       ? api.collection(database, "retailers")
       : api.query(api.collection(database, "retailers"), api.where("active", "==", true));
-    return api.onSnapshot(source, (snapshot) => {
+    return api.onSnapshot(source, { includeMetadataChanges: true }, (snapshot) => {
+      const metadata = { fromCache: snapshot.metadata.fromCache, hasPendingWrites: snapshot.metadata.hasPendingWrites };
+      if (metadata.fromCache || metadata.hasPendingWrites) {
+        onUnavailable(metadata);
+        return;
+      }
       const records = snapshot.docs
         .map((item) => ({ ...item.data(), id: item.id }))
         .filter((item) => manager || item.active);
       records.sort((a, b) => a.nameNormalized.localeCompare(b.nameNormalized));
-      onRecords(records);
+      onRecords(records, metadata);
     }, onError);
   };
 

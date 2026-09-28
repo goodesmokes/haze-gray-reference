@@ -5,8 +5,9 @@ import { auth, db } from "./firebase.mjs";
 
 const FIRESTORE_API = { collection, doc, onSnapshot, orderBy, query, runTransaction, serverTimestamp, where };
 
-export function createOrderService({ db: database, auth: authentication, api = FIRESTORE_API }) {
+export function createOrderService({ db: database, auth: authentication, api = FIRESTORE_API, isOnline = () => globalThis.navigator?.onLine !== false }) {
   const savePendingOrder = async (pending, uid, permitted, cigars, packOptions) => {
+    if (!isOnline()) throw new Error("Saving an order requires a network connection.");
     if (!permitted() || authentication.currentUser?.uid !== uid) throw new Error("You are not authorized to save orders.");
     if (pending?.uid !== uid || typeof pending.id !== "string" || !/^[a-zA-Z0-9]{20}$/.test(pending.id)) throw new Error("Invalid pending save identity.");
     return api.runTransaction(database, async (transaction) => {
@@ -30,16 +31,25 @@ export function createOrderService({ db: database, auth: authentication, api = F
     });
   };
 
-  const subscribeOrderHistory = ({ allOrders, uid }, onRecords, onError) => {
+  const subscribeOrderHistory = ({ allOrders, uid }, onRecords, onError, onUnavailable = () => {}) => {
+    if (!isOnline()) {
+      onUnavailable({ offline: true, fromCache: true, hasPendingWrites: false });
+      return () => {};
+    }
     const scope = allOrders
       ? api.query(api.collection(database, "orders"), api.orderBy("savedAt", "desc"))
       : api.query(api.collection(database, "orders"), api.where("creatorUid", "==", uid), api.orderBy("savedAt", "desc"));
-    return api.onSnapshot(scope, (snapshot) => {
+    return api.onSnapshot(scope, { includeMetadataChanges: true }, (snapshot) => {
+      const metadata = { fromCache: snapshot.metadata.fromCache, hasPendingWrites: snapshot.metadata.hasPendingWrites };
+      if (metadata.fromCache || metadata.hasPendingWrites) {
+        onUnavailable(metadata);
+        return;
+      }
       const records = snapshot.docs
         .filter((item) => !item.metadata.hasPendingWrites && (allOrders || item.data().creatorUid === uid))
         .map((item) => ({ ...item.data(), id: item.id }));
       const readable = records.filter(isReadableSavedOrder);
-      onRecords(readable, records.length - readable.length);
+      onRecords(readable, records.length - readable.length, metadata);
     }, onError);
   };
 

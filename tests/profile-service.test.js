@@ -21,8 +21,8 @@ function createFixture(documents = {}) {
       events.push(`update:${reference.path}`);
       updates.push({ reference, changes });
     },
-    onSnapshot: (source, onData, onError) => {
-      const subscription = { source, onData, onError, stopped: false };
+    onSnapshot: (source, options, onData, onError) => {
+      const subscription = { source, options, onData, onError, stopped: false };
       subscriptions.push(subscription);
       return () => { subscription.stopped = true; };
     }
@@ -54,10 +54,11 @@ test('authorized-user subscription uses /users, maps and sorts profiles, forward
   );
 
   assert.equal(fixture.subscriptions[0].source.path, 'users');
+  assert.deepEqual(fixture.subscriptions[0].options, { includeMetadataChanges: true });
   fixture.subscriptions[0].onData({ docs: [
     { id: 'z', data: () => ({ email: 'z@example.test', role: 'viewer', active: true }) },
     { id: 'a', data: () => ({ displayName: 'Alpha', role: 'admin', active: true }) }
-  ] });
+  ], metadata: { fromCache: false, hasPendingWrites: false } });
   assert.deepEqual(received[0], [
     { displayName: 'Alpha', role: 'admin', active: true, uid: 'a' },
     { email: 'z@example.test', role: 'viewer', active: true, uid: 'z' }
@@ -67,6 +68,25 @@ test('authorized-user subscription uses /users, maps and sorts profiles, forward
   assert.deepEqual(errors, [failure]);
   stop();
   assert.equal(fixture.subscriptions[0].stopped, true);
+});
+
+test('authorized-user subscription never presents cached or pending profiles as current', async () => {
+  const { createProfileService } = await importNativeModule('js/services/profile-service.mjs');
+  const fixture = createFixture();
+  const received = [], unavailable = [];
+  createProfileService({ db: {}, api: fixture.api }).subscribeAuthorizedUsers(
+    (profiles) => received.push(profiles),
+    () => {},
+    (metadata) => unavailable.push(metadata)
+  );
+  const docs = [{ id: 'manager', data: () => ({ role: 'owner', active: true }) }];
+  fixture.subscriptions[0].onData({ docs, metadata: { fromCache: true, hasPendingWrites: false } });
+  fixture.subscriptions[0].onData({ docs, metadata: { fromCache: false, hasPendingWrites: true } });
+  assert.deepEqual(received, []);
+  assert.deepEqual(unavailable, [
+    { fromCache: true, hasPendingWrites: false },
+    { fromCache: false, hasPendingWrites: true }
+  ]);
 });
 
 test('profile reads and updates target exact /users documents and use updateDoc', async () => {

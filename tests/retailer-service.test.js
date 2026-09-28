@@ -24,8 +24,8 @@ function createFixture(documents = {}, options = {}) {
     },
     where: (...args) => ({ type: 'where', args }),
     query: (reference, ...constraints) => ({ reference, constraints }),
-    onSnapshot: (source, onData, onError) => {
-      const subscription = { source, onData, onError, stopped: false };
+    onSnapshot: (source, metadataOptions, onData, onError) => {
+      const subscription = { source, metadataOptions, onData, onError, stopped: false };
       subscriptions.push(subscription);
       return () => { subscription.stopped = true; };
     },
@@ -58,11 +58,12 @@ test('assignment profile subscription maps, sorts, forwards errors, and unsubscr
 
   assert.equal(fixture.subscriptions.length, 1);
   assert.equal(fixture.subscriptions[0].source.path, 'users');
+  assert.deepEqual(fixture.subscriptions[0].metadataOptions, { includeMetadataChanges: true });
   assert.equal(typeof unsubscribe, 'function');
   fixture.subscriptions[0].onData({ docs: [
     { id: 'z-user', data: () => ({ displayName: '', role: 'viewer', active: true }) },
     { id: 'a-user', data: () => ({ displayName: 'Alpha', role: 'field_rep', active: true, territory: 'United States' }) }
-  ] });
+  ], metadata: { fromCache: false, hasPendingWrites: false } });
   assert.deepEqual(received[0], [
     { displayName: 'Alpha', role: 'field_rep', active: true, territory: 'United States', uid: 'a-user' },
     { displayName: '', role: 'viewer', active: true, uid: 'z-user' }
@@ -89,8 +90,10 @@ test('retailer directory subscriptions preserve role query shape, mapping, sorti
     reference: { path: 'retailers' },
     constraints: [{ type: 'where', args: ['active', '==', true] }]
   });
+  assert.deepEqual(fixture.subscriptions[0].metadataOptions, { includeMetadataChanges: true });
+  assert.deepEqual(fixture.subscriptions[1].metadataOptions, { includeMetadataChanges: true });
 
-  const directorySnapshot = { docs: [
+  const directorySnapshot = { metadata: { fromCache: false, hasPendingWrites: false }, docs: [
     { id: 'inactive', data: () => ({ name: 'Closed', nameNormalized: 'closed', active: false, territory: 'West', assignedRepUids: [] }) },
     { id: 'other', data: () => ({ name: 'Beta', nameNormalized: 'beta', active: true, territory: 'United States', assignedRepUids: ['other-rep'] }) },
     { id: 'unassigned', data: () => ({ name: 'Alpha', nameNormalized: 'alpha', active: true, territory: 'East', assignedRepUids: [] }) }
@@ -109,6 +112,19 @@ test('retailer directory subscriptions preserve role query shape, mapping, sorti
   stopManager();
   stopRep();
   assert.equal(fixture.subscriptions.every(({ stopped }) => stopped), true);
+});
+
+test('protected retailer listeners discard cached and pending collection results', async () => {
+  const { createRetailerService } = await importNativeModule('js/services/retailer-service.mjs');
+  const fixture = createFixture();
+  const service = createRetailerService({ db: {}, auth: {}, api: fixture.api });
+  const records = [], unavailable = [];
+  service.subscribeRetailerDirectory(true, (value) => records.push(value), () => {}, (metadata) => unavailable.push(metadata));
+  const docs = [{ id: 'retailer', data: () => ({ nameNormalized: 'retailer', active: true }) }];
+  fixture.subscriptions[0].onData({ docs, metadata: { fromCache: true, hasPendingWrites: false } });
+  fixture.subscriptions[0].onData({ docs, metadata: { fromCache: false, hasPendingWrites: true } });
+  assert.deepEqual(records, []);
+  assert.equal(unavailable.length, 2);
 });
 
 test('assignment writes read the actor and retailer, preserve stale UIDs, and validate only additions', async () => {

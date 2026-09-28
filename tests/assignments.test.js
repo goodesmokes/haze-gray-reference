@@ -77,17 +77,17 @@ test('My/All/Assigned/Unassigned/rep filters preserve the shared dataset and sea
 test('profile listener never starts for Field Reps and clears across accounts, role loss and failures',()=>{
  let state,cleanup,callback,failure,subscriptions=0,stops=0;
  const auth={currentUser:{uid:'owner'}};
- const subscriptionApi={collection:()=>({}),onSnapshot:(_ref,next,error)=>{subscriptions++;callback=next;failure=error;return ()=>stops++;}};
+ const subscriptionApi={collection:()=>({}),onSnapshot:(_ref,_options,next,error)=>{subscriptions++;callback=next;failure=error;return ()=>stops++;}};
  const env={auth,subscribeAssignmentProfiles:createRetailerService({db:{},auth,api:subscriptionApi}).subscribeAssignmentProfiles,
  useState:initial=>typeof initial==='number'?[0,()=>{}]:[state===undefined?initial:state,value=>state=value],
  useEffect:effect=>{cleanup=effect();}};
  const ui=loadClient(env);
  assert.deepEqual(ui.useAssignmentProfiles({uid:'owner'},false).profiles,[]);assert.equal(subscriptions,0);cleanup();
- ui.useAssignmentProfiles({uid:'owner'},true);callback({docs:[{id:'a',data:()=>({displayName:'Alice',role:'field_rep',active:true})}]});assert.equal(state.profiles.length,1);
+ ui.useAssignmentProfiles({uid:'owner'},true);callback({metadata:{fromCache:false,hasPendingWrites:false},docs:[{id:'a',data:()=>({displayName:'Alice',role:'field_rep',active:true})}]});assert.equal(state.profiles.length,1);
  const old=callback;cleanup();auth.currentUser={uid:'admin'};
  assert.deepEqual(ui.useAssignmentProfiles({uid:'admin'},true).profiles,[]);
- old({docs:[{id:'secret',data:()=>({displayName:'old'})}]});assert.deepEqual(state.profiles,[]);
- callback({docs:[{id:'b',data:()=>({displayName:'Bob'})}]});assert.equal(state.profiles[0].uid,'b');
+ old({metadata:{fromCache:false,hasPendingWrites:false},docs:[{id:'secret',data:()=>({displayName:'old'})}]});assert.deepEqual(state.profiles,[]);
+ callback({metadata:{fromCache:false,hasPendingWrites:false},docs:[{id:'b',data:()=>({displayName:'Bob'})}]});assert.equal(state.profiles[0].uid,'b');
  failure(new Error('permission denied'));assert.deepEqual(state.profiles,[]);assert.match(state.error,/Could not load assignment profiles/);
  cleanup();auth.currentUser={uid:'rep'};assert.deepEqual(ui.useAssignmentProfiles({uid:'rep'},false).profiles,[]);assert.equal(subscriptions,2);
  cleanup();auth.currentUser=null;assert.deepEqual(ui.useAssignmentProfiles(null,false).profiles,[]);assert.equal(stops,2);

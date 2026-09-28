@@ -4,9 +4,12 @@ import { validateCatalogImage } from "../domain/catalog-images.mjs";
 
 const FIRESTORE_API = { collection, deleteDoc, doc, getDoc, getDocs, onSnapshot, setDoc };
 
-export function createCatalogService(database, api = FIRESTORE_API) {
+export function createCatalogService(database, api = FIRESTORE_API, isOnline = () => globalThis.navigator?.onLine !== false) {
   const cigarsCollection = api.collection(database, "cigars");
   const legacyDocument = api.doc(database, "app-data", "cigars");
+  const requireOnline = () => {
+    if (!isOnline()) throw new Error("This catalog operation requires a network connection.");
+  };
 
   const subscribeCatalog = (onRecords, onError) => api.onSnapshot(
     cigarsCollection,
@@ -23,6 +26,7 @@ export function createCatalogService(database, api = FIRESTORE_API) {
   );
 
   const isLegacyCatalogMigrationAvailable = async () => {
+    requireOnline();
     const [catalogSnapshot, legacySnapshot] = await Promise.all([
       api.getDocs(cigarsCollection),
       api.getDoc(legacyDocument)
@@ -31,12 +35,17 @@ export function createCatalogService(database, api = FIRESTORE_API) {
   };
 
   const saveCatalogRecord = async (record) => {
+    requireOnline();
     validateCatalogImage(record);
     return api.setDoc(api.doc(database, "cigars", record.id), record);
   };
-  const deleteCatalogRecord = (id) => api.deleteDoc(api.doc(database, "cigars", id));
+  const deleteCatalogRecord = (id) => {
+    requireOnline();
+    return api.deleteDoc(api.doc(database, "cigars", id));
+  };
 
   const readLegacyCatalog = async () => {
+    requireOnline();
     const snapshot = await api.getDoc(legacyDocument);
     if (!snapshot.exists() || !snapshot.data().payload) return null;
     const records = JSON.parse(snapshot.data().payload);

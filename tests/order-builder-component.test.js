@@ -140,7 +140,7 @@ test('Order Builder draft identity, persistence and permission-loss cleanup rema
   assert.match(root, /setRetailerId\(restored\.retailerId \|\| ""\)[\s\S]*?setOrderNotes\(restored\.orderNotes \|\| ""\)/);
   assert.match(text('openOrderBuilder'), /setShowFinalReview\(false\)[\s\S]*?setShowOrderBuilder\(true\)/);
   assert.match(root, /if \(!canUseOrderBuilder\) \{ setShowOrderBuilder\(false\); setCompareOrderId\(null\); \}/);
-  assert.match(root, /if \(!accessRef\.current\.permissions\.canUseOrderBuilder\) clearProtectedDraft\(\)/);
+  assert.match(root, /if \(!confirmedPermissions\.canUseOrderBuilder\) clearProtectedDraft\(\)/);
   assert.match(root, /showOrderBuilder && canUseOrderBuilder/);
 });
 

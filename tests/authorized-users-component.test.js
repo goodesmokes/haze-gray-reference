@@ -51,7 +51,7 @@ test('authorized-user subscription cleanup suppresses late success and error cal
   const authorizedUsersSource = componentSource('AuthorizedUsers');
 
   assert.match(authorizedUsersSource, /let listening = true/);
-  assert.equal((authorizedUsersSource.match(/if \(!listening\) return/g) || []).length, 2);
+  assert.equal((authorizedUsersSource.match(/if \(!listening\) return/g) || []).length, 3);
   assert.match(authorizedUsersSource, /return \(\) => \{ listening = false; unsubscribe\(\); \}/);
 
   const events = [];
