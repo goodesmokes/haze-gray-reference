@@ -1,6 +1,6 @@
 const APP_SCOPE = "/haze-gray-reference/";
 const CACHE_PREFIX = "haze-gray-reference-pwa-";
-const CACHE_NAME = `${CACHE_PREFIX}shell-v4`;
+const CACHE_NAME = `${CACHE_PREFIX}shell-v5`;
 const IMAGE_CACHE_PREFIX = "haze-gray-reference-catalog-images-";
 const IMAGE_CACHE_NAME = `${IMAGE_CACHE_PREFIX}v1`;
 const CATALOG_IMAGE_MESSAGE = "haze-gray-reference:catalog-images";

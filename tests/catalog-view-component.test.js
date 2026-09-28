@@ -124,7 +124,7 @@ test('app imports the extracted catalog list without retaining a duplicate imple
 
 test('cigar detail preserves identity, fallbacks, display wiring and permission gates', () => {
   assert.match(root, /const selected = cigars\.find\(\(c\) => c\.id === selectedId\)/);
-  assert.match(cigarDetail, /h\(Cigarette, \{ size: 56[\s\S]*?selected\.imageUrl && h\("img", \{ src: selected\.imageUrl, alt: selected\.name, onError:/);
+  assert.match(cigarDetail, /h\(Cigarette, \{ size: 56[\s\S]*?selected\.imageUrl && h\("img", \{ src: selected\.imageUrl, alt: selected\.name, onError: \(event\) => handleCatalogImageError\(event, selected\.imageUrl\)/);
   assert.match(cigarDetail, /h\(Gauge, \{ value: selected\.strength, label: "Strength" \}\)/);
   assert.match(cigarDetail, /h\(Gauge, \{ value: selected\.body, label: "Body" \}\)/);
   assert.match(cigarDetail, /h\(Tag, \{ key: index, tone: "brass" \}, note\)/);

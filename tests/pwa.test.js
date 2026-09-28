@@ -37,7 +37,7 @@ const shellFiles = [
   'vendor/firebase/10.12.2/firebase-firestore.js'
 ];
 const shell = shellFiles.map(name => scope + name);
-const cacheName = 'haze-gray-reference-pwa-shell-v4';
+const cacheName = 'haze-gray-reference-pwa-shell-v5';
 const imageCacheName = 'haze-gray-reference-catalog-images-v1';
 
 function worker({ network = async () => new Response('network'), entries = new Map(), imageEntries = new Map(), names = [], installFailure = false, imageOpenFailure = false } = {}) {

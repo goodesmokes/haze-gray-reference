@@ -1,5 +1,6 @@
 import React from "react";
 import { ChevronRight, Cigarette, Scale, Search } from "lucide-react";
+import { handleCatalogImageError } from "../services/catalog-image-cache.mjs";
 
 const h = React.createElement;
 
@@ -46,7 +47,7 @@ export function CatalogList({ cigars, filtered, groupedFiltered, query, onQueryC
                   : h(Cigarette, { size: 16, color: "#454b53", style: { flex: "0 0 16px" } }),
                 h("div", { style: { width: 44, height: 44, borderRadius: 4, background: "#0e0d0b", flex: "0 0 44px", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", border: "1px solid #3B2A1E", position: "relative" } },
                   h(Cigarette, { size: 20, color: "#454b53" }),
-                  c.imageUrl && h("img", { src: c.imageUrl, alt: "", onError: (event) => { event.currentTarget.style.display = "none"; }, style: { position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" } })
+                  c.imageUrl && h("img", { src: c.imageUrl, alt: "", onError: (event) => handleCatalogImageError(event, c.imageUrl), style: { position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" } })
                 ),
                 h("div", { style: { flex: 1, minWidth: 0 } },
                   h("div", { style: { fontFamily: "'Bebas Neue', sans-serif", fontSize: 20, letterSpacing: 0.5, lineHeight: 1.1 } }, c.name),

@@ -1,6 +1,7 @@
 import React from "react";
 import { ArrowLeft, Cigarette, Pencil, Trash2 } from "lucide-react";
 import { computePackageMargins } from "../domain/pricing.mjs";
+import { handleCatalogImageError } from "../services/catalog-image-cache.mjs";
 import { Gauge, Tag } from "./common-ui.mjs";
 
 const h = React.createElement;
@@ -29,7 +30,7 @@ export function CigarDetail({ selected, canEditCatalog, user, orderControls, onB
       h("div", { style: { display: "flex", flexWrap: "wrap", gap: 0 } },
         h("div", { style: { width: 220, minHeight: 220, flex: "0 0 220px", background: "#0e0d0b", display: "flex", alignItems: "center", justifyContent: "center", borderRight: "1px solid #3B2A1E", position: "relative" } },
           h(Cigarette, { size: 56, color: "#454b53" }),
-          selected.imageUrl && h("img", { src: selected.imageUrl, alt: selected.name, onError: (event) => { event.currentTarget.style.display = "none"; }, style: { position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" } })
+          selected.imageUrl && h("img", { src: selected.imageUrl, alt: selected.name, onError: (event) => handleCatalogImageError(event, selected.imageUrl), style: { position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" } })
         ),
         h("div", { style: { flex: "1 1 300px", padding: "22px 24px" } },
           selected.line && h("div", { style: { fontFamily: "'Oswald', sans-serif", fontSize: 12, letterSpacing: 2, color: "#B8894C", textTransform: "uppercase" } }, selected.line),
