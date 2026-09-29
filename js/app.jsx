@@ -33,6 +33,7 @@ const LOGO_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAPAAAADwCAI
 
 
 const ORDER_DRAFT_STORAGE_KEY = "haze-gray-cigars.order-draft.v2.";
+const ORDER_SUMMARY_PRICING_DISCLAIMER = "Note: Displayed totals do not include shipping costs or applicable discounts and promotions. Final order total may vary.";
 const orderDraftKey = (uid) => uid ? ORDER_DRAFT_STORAGE_KEY + uid : null;
 
 function browserIsOnline(navigatorValue = globalThis.navigator) {
@@ -326,6 +327,8 @@ const orderMarginPct =
     `Retail Value: $${orderRetailTotal.toFixed(2)}`,
     `Gross Profit: $${orderGrossProfit.toFixed(2)}`,
     `Margin: ${orderMarginPct.toFixed(1)}%`,
+    "",
+    ORDER_SUMMARY_PRICING_DISCLAIMER,
     "",
     orderNotes ? `Notes: ${orderNotes}` : "",
   ].join("\n");
