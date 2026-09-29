@@ -37,7 +37,7 @@ const shellFiles = [
   'vendor/firebase/10.12.2/firebase-firestore.js'
 ];
 const shell = shellFiles.map(name => scope + name);
-const cacheName = 'haze-gray-reference-pwa-shell-v5';
+const cacheName = 'haze-gray-reference-pwa-shell-v6';
 const imageCacheName = 'haze-gray-reference-catalog-images-v1';
 
 function worker({ network = async () => new Response('network'), entries = new Map(), imageEntries = new Map(), names = [], installFailure = false, imageOpenFailure = false } = {}) {
@@ -64,7 +64,7 @@ function worker({ network = async () => new Response('network'), entries = new M
   return {
     handlers, opened, deleted, added, fetched, puts, imageDeletes, imageEntries,
     lifecycle: name => { let result; handlers.get(name)({ waitUntil: promise => { result = promise; } }); return result; },
-    message: data => { let result; handlers.get('message')({ data, waitUntil: promise => { result = promise; } }); return result; },
+    message: (data, ports = []) => { let result; handlers.get('message')({ data, ports, waitUntil: promise => { result = promise; } }); return result; },
     request: (url, mode = 'cors', method = 'GET') => {
       let response;
       const href = new URL(url, origin).href;
@@ -152,9 +152,9 @@ test('install atomically caches the complete 48-resource local executable shell'
 test('activation deletes only older Haze Gray PWA caches without taking over active clients', async () => {
   const oldFoundation = 'haze-gray-reference-pwa-foundation-v1';
   const oldShell = 'haze-gray-reference-pwa-shell-v1';
-  const app = worker({ names: [oldFoundation, oldShell, 'haze-gray-reference-pwa-shell-v2', cacheName, 'another-app-v1', 'haze-gray-reference-catalog-v1', imageCacheName] });
+  const app = worker({ names: [oldFoundation, oldShell, 'haze-gray-reference-pwa-shell-v2', 'haze-gray-reference-pwa-shell-v5', cacheName, 'another-app-v1', 'haze-gray-reference-catalog-v1', imageCacheName] });
   await app.lifecycle('activate');
-  assert.deepEqual(app.deleted, [oldFoundation, oldShell, 'haze-gray-reference-pwa-shell-v2']);
+  assert.deepEqual(app.deleted, [oldFoundation, oldShell, 'haze-gray-reference-pwa-shell-v2', 'haze-gray-reference-pwa-shell-v5']);
   assert.deepEqual([...app.handlers.keys()], ['install', 'activate', 'message', 'fetch']);
 });
 
@@ -225,6 +225,43 @@ test('catalog image messages accept only exact same-origin cigar WebP paths with
   assert.deepEqual(app.fetched.map(url => new URL(url).pathname), [future]);
   assert.deepEqual(app.puts, [future]);
   assert.equal(shell.includes(future), false);
+});
+
+test('catalog image acknowledgement is correlated and sent only after synchronization completes', async () => {
+  const image = scope + 'assets/cigars/1982.webp';
+  let releaseNetwork;
+  const network = new Promise(resolve => { releaseNetwork = resolve; });
+  const replies = [];
+  const app = worker({ network: async () => network });
+  const completion = app.message({
+    type: 'haze-gray-reference:catalog-images', requestId: 'sync-1', operation: 'synchronize',
+    authoritative: false, paths: [image]
+  }, [{ postMessage: result => replies.push(result) }]);
+  await Promise.resolve();
+  assert.deepEqual(replies, []);
+  releaseNetwork(new Response('image', { headers: { 'content-type': 'image/webp' } }));
+  await completion;
+  assert.deepEqual(JSON.parse(JSON.stringify(replies)), [{
+    type: 'haze-gray-reference:catalog-images-result', requestId: 'sync-1',
+    ok: true, reason: 'worker-ready', present: [image], missing: []
+  }]);
+});
+
+test('catalog image probe reports exact approved present and missing paths without network access', async () => {
+  const present = scope + 'assets/cigars/Irmaos_do_Mar.webp';
+  const missing = scope + 'assets/cigars/Patriot.webp';
+  const invalid = scope + 'assets/cigars/query.webp?version=2';
+  const replies = [];
+  const app = worker({ imageEntries: new Map([[present, new Response('image', { headers: { 'content-type': 'image/webp' } })]]) });
+  await app.message({
+    type: 'haze-gray-reference:catalog-images', requestId: 'probe-1', operation: 'probe',
+    authoritative: false, paths: [missing, invalid, present]
+  }, [{ postMessage: result => replies.push(result) }]);
+  assert.deepEqual(app.fetched, []);
+  assert.deepEqual(JSON.parse(JSON.stringify(replies)), [{
+    type: 'haze-gray-reference:catalog-images-result', requestId: 'probe-1',
+    ok: true, reason: 'worker-ready', present: [present], missing: [missing]
+  }]);
 });
 
 test('authoritative image synchronization revalidates desired images and removes only obsolete catalog images', async () => {

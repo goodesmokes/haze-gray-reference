@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { readApplicationModule } = require('./test-support.cjs');
+const { collectNamedNodes, nodeText, readApplicationModule } = require('./test-support.cjs');
 
 const source = readApplicationModule();
 
@@ -8,9 +8,19 @@ test('startup hydrates durable catalog immediately while Firestore refresh runs 
   const load = source.indexOf('loadCatalogSnapshot().then');
   const subscribe = source.indexOf('const unsubscribe = subscribeCatalog');
   assert(load > 0 && subscribe > load);
-  assert.match(source, /setCigars\(snapshot\.records\)[\s\S]*?setCatalogStatus\(listenerFailure \|\| globalThis\.navigator\?\.onLine === false \? "cached" : "updating"\)/);
+  assert.match(source, /durableCatalogRef\.current = true;[\s\S]*?setCigars\(snapshot\.records\)[\s\S]*?setCatalogStatus\(listenerFailure \|\| !browserOnlineRef\.current \? "cached" : "updating"\)/);
   assert.match(source, /if \(!active\) return;\s*if \(!isTrustedCatalogEvent\(event\)\)/);
   assert.match(source, /event\?\.metadata\?\.fromCache === true && globalThis\.navigator\?\.onLine === false/);
+});
+
+test('offline connectivity after durable snapshot restoration changes updating provenance to cached', () => {
+  const nodes = collectNamedNodes(source, candidate => candidate === 'catalogStatusAfterConnectivity');
+  const catalogStatusAfterConnectivity = Function(`return ${nodeText(source, nodes, 'catalogStatusAfterConnectivity')}`)();
+  assert.equal(catalogStatusAfterConnectivity(true, true, 'updating'), 'updating');
+  assert.equal(catalogStatusAfterConnectivity(false, false, 'updating'), 'updating');
+  assert.equal(catalogStatusAfterConnectivity(false, true, 'updating'), 'cached');
+  assert.equal(catalogStatusAfterConnectivity(false, true, 'live'), 'cached');
+  assert.match(source, /setCatalogStatus\(\(current\) => catalogStatusAfterConnectivity\(online, durableCatalogRef\.current, current\)\)/);
 });
 
 test('network and storage failures preserve good data and expose honest catalog states', () => {

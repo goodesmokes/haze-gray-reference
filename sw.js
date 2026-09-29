@@ -1,9 +1,10 @@
 const APP_SCOPE = "/haze-gray-reference/";
 const CACHE_PREFIX = "haze-gray-reference-pwa-";
-const CACHE_NAME = `${CACHE_PREFIX}shell-v5`;
+const CACHE_NAME = `${CACHE_PREFIX}shell-v6`;
 const IMAGE_CACHE_PREFIX = "haze-gray-reference-catalog-images-";
 const IMAGE_CACHE_NAME = `${IMAGE_CACHE_PREFIX}v1`;
 const CATALOG_IMAGE_MESSAGE = "haze-gray-reference:catalog-images";
+const CATALOG_IMAGE_RESULT_MESSAGE = "haze-gray-reference:catalog-images-result";
 const CATALOG_IMAGE_PATH = /^\/haze-gray-reference\/assets\/cigars\/[A-Za-z0-9][A-Za-z0-9_-]*[.]webp$/;
 const INDEX_PATH = `${APP_SCOPE}index.html`;
 const SHELL_PATHS = [
@@ -85,12 +86,41 @@ async function synchronizeCatalogImages(paths, authoritative) {
   const desired = new Set(paths.map((path) => catalogImageUrl(path)?.pathname).filter(Boolean));
   const cache = await caches.open(IMAGE_CACHE_NAME);
   await Promise.allSettled([...desired].map((path) => refreshCatalogImage(cache, path)));
-  if (!authoritative) return;
-  const entries = await cache.keys();
-  await Promise.allSettled(entries.map((request) => {
-    const url = catalogImageUrl(new URL(request.url).pathname);
-    return url && !desired.has(url.pathname) ? cache.delete(request) : Promise.resolve(false);
+  if (authoritative) {
+    const entries = await cache.keys();
+    await Promise.allSettled(entries.map((request) => {
+      const url = catalogImageUrl(new URL(request.url).pathname);
+      return url && !desired.has(url.pathname) ? cache.delete(request) : Promise.resolve(false);
+    }));
+  }
+  return catalogImageCacheStatus(cache, desired);
+}
+
+async function catalogImageCacheStatus(cache, paths) {
+  const present = [];
+  const missing = [];
+  await Promise.all([...paths].map(async (path) => {
+    const request = new Request(new URL(path, self.location.origin));
+    const response = await cache.match(request, { ignoreVary: true }).catch(() => null);
+    (validCatalogImageResponse(response) ? present : missing).push(path);
   }));
+  present.sort();
+  missing.sort();
+  return { present, missing };
+}
+
+async function catalogImageMessageResult(data) {
+  const desired = new Set(data.paths.map((path) => catalogImageUrl(path)?.pathname).filter(Boolean));
+  try {
+    if (data.operation === "probe") {
+      const cache = await caches.open(IMAGE_CACHE_NAME);
+      return { ok: true, reason: "worker-ready", ...await catalogImageCacheStatus(cache, desired) };
+    }
+    const status = await synchronizeCatalogImages([...desired], data.authoritative === true);
+    return { ok: true, reason: "worker-ready", ...status };
+  } catch {
+    return { ok: false, reason: "cache-unavailable", present: [], missing: [...desired].sort() };
+  }
 }
 
 async function catalogImageResponse(request) {
@@ -135,7 +165,14 @@ self.addEventListener("activate", (event) => {
 self.addEventListener("message", (event) => {
   const data = event.data;
   if (data?.type !== CATALOG_IMAGE_MESSAGE || !Array.isArray(data.paths)) return;
-  event.waitUntil(synchronizeCatalogImages(data.paths, data.authoritative === true).catch(() => {}));
+  const responsePort = event.ports?.[0];
+  event.waitUntil(catalogImageMessageResult(data).then((result) => {
+    responsePort?.postMessage({
+      type: CATALOG_IMAGE_RESULT_MESSAGE,
+      requestId: typeof data.requestId === "string" ? data.requestId : "",
+      ...result
+    });
+  }).catch(() => {}));
 });
 
 self.addEventListener("fetch", (event) => {

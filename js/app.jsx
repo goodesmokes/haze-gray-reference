@@ -39,6 +39,10 @@ function browserIsOnline(navigatorValue = globalThis.navigator) {
   return navigatorValue?.onLine !== false;
 }
 
+function catalogStatusAfterConnectivity(online, hasDurableSnapshot, currentStatus) {
+  return !online && hasDurableSnapshot ? "cached" : currentStatus;
+}
+
 function confirmedProfileAccess(snapshot) {
   if (!snapshot || snapshot.metadata.fromCache || snapshot.metadata.hasPendingWrites) {
     return { confirmed: false, profile: null, permissions: NO_PERMISSIONS };
@@ -126,6 +130,7 @@ function useRetailerDirectory(user, profile, enabled) {
 function HazeGrayReference() {
   const [browserOnline, setBrowserOnline] = useState(browserIsOnline);
   const browserOnlineRef = useRef(browserOnline);
+  const durableCatalogRef = useRef(false);
   const [cigars, setCigars] = useState([]);
   const [loading, setLoading] = useState(true);
   const [catalogStatus, setCatalogStatus] = useState("loading");
@@ -496,6 +501,7 @@ const openOrderFromCompare = (cigarId) => {
       const online = browserIsOnline();
       browserOnlineRef.current = online;
       setBrowserOnline(online);
+      setCatalogStatus((current) => catalogStatusAfterConnectivity(online, durableCatalogRef.current, current));
     };
     globalThis.addEventListener?.("online", updateConnectivity);
     globalThis.addEventListener?.("offline", updateConnectivity);
@@ -784,11 +790,12 @@ const openOrderFromCompare = (cigarId) => {
     loadCatalogSnapshot().then((snapshot) => {
       storageReady = true;
       durableSnapshot = snapshot;
+      if (snapshot) durableCatalogRef.current = true;
       if (!active || serverConfirmed) return;
       if (snapshot) {
         setCigars(snapshot.records);
         setCatalogConfirmedAt(snapshot.serverConfirmedAt);
-        setCatalogStatus(listenerFailure || globalThis.navigator?.onLine === false ? "cached" : "updating");
+        setCatalogStatus(listenerFailure || !browserOnlineRef.current ? "cached" : "updating");
         setLoading(false);
         requestCatalogImageCache(snapshot.records, { authoritative: false });
       } else if (listenerFailure || globalThis.navigator?.onLine === false) {
@@ -834,6 +841,8 @@ const openOrderFromCompare = (cigarId) => {
         try {
           await replaceCatalogSnapshot(snapshot);
           durableSnapshot = snapshot;
+          durableCatalogRef.current = true;
+          if (!browserOnlineRef.current) setCatalogStatus("cached");
         } catch (storageError) {
           // Live catalog use remains available when browser storage is unavailable.
           console.warn("Could not store the offline catalog snapshot:", storageError);
