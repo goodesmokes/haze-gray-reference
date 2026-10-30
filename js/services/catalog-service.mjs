@@ -1,8 +1,17 @@
 import { collection, deleteDoc, doc, getDoc, getDocs, onSnapshot, setDoc } from "firebase/firestore";
 import { db } from "./firebase.mjs";
 import { validateCatalogImage } from "../domain/catalog-images.mjs";
+import { getSizeAvailability } from "../domain/catalog-availability.mjs";
 
 const FIRESTORE_API = { collection, deleteDoc, doc, getDoc, getDocs, onSnapshot, setDoc };
+
+export function validateCatalogAvailability(record) {
+  if (!record || typeof record !== "object") throw new Error("Catalog record must be an object.");
+  if (record.sizes === undefined) return record;
+  if (!Array.isArray(record.sizes)) throw new Error("Catalog sizes must be an array.");
+  record.sizes.forEach(getSizeAvailability);
+  return record;
+}
 
 export function createCatalogService(database, api = FIRESTORE_API, isOnline = () => globalThis.navigator?.onLine !== false) {
   const cigarsCollection = api.collection(database, "cigars");
@@ -37,6 +46,7 @@ export function createCatalogService(database, api = FIRESTORE_API, isOnline = (
   const saveCatalogRecord = async (record) => {
     requireOnline();
     validateCatalogImage(record);
+    validateCatalogAvailability(record);
     return api.setDoc(api.doc(database, "cigars", record.id), record);
   };
   const deleteCatalogRecord = (id) => {
@@ -51,7 +61,10 @@ export function createCatalogService(database, api = FIRESTORE_API, isOnline = (
     const records = JSON.parse(snapshot.data().payload);
     if (!Array.isArray(records)) throw new Error("Legacy catalog must be an array.");
     // Preflight the entire import before the caller starts sequential writes.
-    records.forEach(validateCatalogImage);
+    records.forEach((record) => {
+      validateCatalogImage(record);
+      validateCatalogAvailability(record);
+    });
     return records;
   };
 

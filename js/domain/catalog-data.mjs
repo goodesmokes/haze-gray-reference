@@ -1,5 +1,8 @@
+import { SIZE_AVAILABILITY } from "./catalog-availability.mjs";
+
 export const newSizeRow = () => ({
   key: `s-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+  availability: SIZE_AVAILABILITY.AVAILABLE,
   vitola: "", dims: "", msrp: "",
   keystoneSingle: "", keystoneBox10: "", keystoneBox20: "", keystoneBundle20: "",
 });

@@ -3,9 +3,10 @@ import { createRoot } from "react-dom/client";
 import { Plus, X, ChevronRight, ArrowLeft, Cigarette, Loader2, Mail, Copy, ShoppingCart, Minus } from "lucide-react";
 import { doc, onSnapshot } from "firebase/firestore";
 import { parseMoney, getNumericPrice, getSinglePrice } from "./js/domain/pricing.mjs";
+import { isSizeOrderable } from "./js/domain/catalog-availability.mjs";
 import { ROLE_LABELS, NO_PERMISSIONS, ROLE_PERMISSIONS, isValidRole, isActiveProfile, getProfilePermissions } from "./js/domain/authorization.mjs";
 import { normalizeRetailerName, validRetailerId } from "./js/domain/retailers.mjs";
-import { nonnegativeMoney, isReadableSavedOrder, buildReorderPlan, mergeReorderItems } from "./js/domain/saved-orders.mjs";
+import { nonnegativeMoney, isReadableSavedOrder, buildReorderPlan, findUnavailableOrderItems, mergeReorderItems } from "./js/domain/saved-orders.mjs";
 import { newSizeRow, SEED_CIGARS, EMPTY_FORM, PACK_OPTIONS } from "./js/domain/catalog-data.mjs";
 import { createCatalogSnapshot, isTrustedCatalogEvent } from "./js/domain/catalog-snapshot.mjs";
 import { db, auth } from "./js/services/firebase.mjs";
@@ -163,6 +164,7 @@ function HazeGrayReference() {
 
   const addToOrder = (cigar, size, packKey, quantity = 1) => {
   if (!requirePermission("canUseOrderBuilder")) return false;
+  if (!isSizeOrderable(size)) return false;
   if (!Number.isSafeInteger(quantity) || quantity < 1) return false;
   const pack = PACK_OPTIONS.find((p) => p.key === packKey);
   if (!pack) return false;
@@ -640,6 +642,13 @@ const openOrderFromCompare = (cigarId) => {
   };
   const openFinalReview = () => {
     if (!requirePermission("canUseFinalReview")) return;
+    const unavailable = findUnavailableOrderItems(orderItems, cigars, PACK_OPTIONS);
+    if (unavailable.length) {
+      setError(`Final Review is unavailable: ${unavailable[0].cigarName} / ${unavailable[0].vitola} — ${unavailable[0].reason}. Remove or correct unavailable items.`);
+      setShowOrderBuilder(true);
+      return;
+    }
+    setError("");
     setShowFinalReview(true);
   };
   const openAuthorizedUsers = () => {
@@ -902,6 +911,7 @@ const openOrderFromCompare = (cigarId) => {
 
   return {
     key: s.key,
+    availability: s.availability,
     vitola: s.vitola.trim(),
     dims: s.dims.trim(),
     msrp,

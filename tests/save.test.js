@@ -53,6 +53,26 @@ test('saved-order module handles retailer linkage and current/legacy reorder pri
     assert.equal(plan.available[0].line.retailUnitValue, 124);
   }
   assert.equal(client.buildReorderPlan(order, [], packs, []).unavailable[0].reason, 'Product unavailable');
+  for (const [availability, label] of [['backordered', 'Backordered'], ['out_of_stock', 'Out of Stock']]) {
+    const unavailableCatalog = [{ ...current[0], sizes: [{ ...current[0].sizes[0], availability }] }];
+    const before = JSON.stringify(order);
+    const plan = client.buildReorderPlan(order, unavailableCatalog, packs, []);
+    assert.equal(plan.available.length, 0);
+    assert.equal(plan.unavailable[0].reason, `Size ${label}`);
+    assert.equal(JSON.stringify(order), before, 'historical order remains unchanged');
+  }
+});
+
+test('current draft validation treats legacy/available sizes as orderable and reports every unavailable package', () => {
+  const packs = [{ key: 'box10', label: '10ct Box' }, { key: 'box20', label: '20ct Box' }];
+  const lines = [line, { ...line, lineKey: '1982__1982-robusto__box20', packKey: 'box20', packLabel: '20ct Box' }];
+  const catalog = [{ id: '1982', sizes: [{ key: '1982-robusto', pricing: { box10: 64.5, box20: 129 } }] }];
+  assert.deepEqual(client.findUnavailableOrderItems(lines, catalog, packs), []);
+  for (const availability of ['backordered', 'out_of_stock']) {
+    const issues = client.findUnavailableOrderItems(lines, [{ ...catalog[0], sizes: [{ ...catalog[0].sizes[0], availability }] }], packs);
+    assert.equal(issues.length, 2, 'all packages inherit the size status');
+    assert(issues.every((issue) => issue.reason.startsWith('Size ')));
+  }
 });
 
 test('duplicate reorder lines merge without mutating inputs', () => {

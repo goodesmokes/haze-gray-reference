@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Plus, ShoppingCart } from "lucide-react";
 import { getNumericPrice, getSinglePrice } from "../domain/pricing.mjs";
+import { isSizeOrderable, sizeAvailabilityLabel } from "../domain/catalog-availability.mjs";
 
 const h = React.createElement;
 
@@ -16,8 +17,9 @@ export function DetailOrderControls({ cigar, packOptions, orderItems, onAdd, onV
     price: pack.key === "single" ? getSinglePrice(size, "box") : getNumericPrice(size, pack.key),
   })).filter((pack) => Number.isFinite(pack.price) && pack.price >= 0);
   const sizes = (cigar.sizes || []).filter((size) => size.key && packagesFor(size).length);
+  const orderableSizes = sizes.filter(isSizeOrderable);
   const size = sizes.find((item) => item.key === sizeKey);
-  const packages = size ? packagesFor(size) : [];
+  const packages = size && isSizeOrderable(size) ? packagesFor(size) : [];
   const pack = packages.find((item) => item.key === packKey);
   const totalQuantity = orderItems.reduce((sum, item) => sum + item.qty, 0);
   useEffect(() => {
@@ -26,7 +28,7 @@ export function DetailOrderControls({ cigar, packOptions, orderItems, onAdd, onV
     return () => clearTimeout(timer);
   }, [notice]);
   const open = () => {
-    const firstSize = sizes[0];
+    const firstSize = orderableSizes[0];
     setSizeKey(firstSize?.key || "");
     setPackKey(firstSize ? packagesFor(firstSize)[0].key : "");
     setQuantity("1");
@@ -39,6 +41,10 @@ export function DetailOrderControls({ cigar, packOptions, orderItems, onAdd, onV
     const qty = Number(quantity);
     if (!quantity.trim() || !Number.isSafeInteger(qty) || qty < 1) {
       setValidation("Enter a whole-number quantity of 1 or more.");
+      return;
+    }
+    if (size && !isSizeOrderable(size)) {
+      setValidation(`${sizeAvailabilityLabel(size)} sizes cannot be added to new orders.`);
       return;
     }
     if (!size || !pack) {
@@ -62,17 +68,17 @@ export function DetailOrderControls({ cigar, packOptions, orderItems, onAdd, onV
   const buttonStyle = { background: "none", border: "1px solid #6E7681", color: "#C9CFD6", borderRadius: 4, padding: "8px 12px", fontFamily: "'Oswald', sans-serif", fontSize: 13 };
   return h("div", { style: { marginBottom: 14 } },
     h("div", { style: { display: "flex", gap: 10, flexWrap: "wrap" } },
-      h("button", { type: "button", className: "hg-btn", onClick: open, disabled: !sizes.length, "aria-expanded": expanded, style: { ...buttonStyle, background: "#B8894C", color: "#14161A", opacity: sizes.length ? 1 : 0.5 } }, h(Plus, { size: 14 }), " Add to Order"),
+      h("button", { type: "button", className: "hg-btn", onClick: open, disabled: !orderableSizes.length, "aria-expanded": expanded, style: { ...buttonStyle, background: "#B8894C", color: "#14161A", opacity: orderableSizes.length ? 1 : 0.5 } }, h(Plus, { size: 14 }), " Add to Order"),
       h("button", { type: "button", className: "hg-btn", onClick: onViewOrder, style: buttonStyle }, h(ShoppingCart, { size: 14 }), ` View Order (${totalQuantity})`)
     ),
-    !sizes.length && h("div", { style: { color: "#8A93A0", fontSize: 12, marginTop: 8 } }, "No sizes with available order pricing."),
+    !orderableSizes.length && h("div", { style: { color: "#8A93A0", fontSize: 12, marginTop: 8 } }, "No available sizes with order pricing."),
     h("div", { role: "status", "aria-live": "polite", style: { color: "#B8894C", fontFamily: "'Oswald', sans-serif", fontSize: 13, marginTop: notice ? 8 : 0 } }, notice),
     expanded && h("form", { onSubmit: confirm, noValidate: true, style: { border: "1px solid #3B2A1E", borderRadius: 6, padding: 14, marginTop: 12 } },
       h("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10, fontFamily: "'Oswald', sans-serif", color: "#8A93A0", fontSize: 12 } },
         h("label", null, "Vitola / Size",
           h("select", { value: sizeKey, onChange: (event) => { const next = sizes.find((item) => item.key === event.target.value); setSizeKey(event.target.value); setPackKey(next ? packagesFor(next)[0].key : ""); setValidation(""); }, style: fieldStyle },
             !size && h("option", { value: "" }, "Select a size"),
-            sizes.map((item) => h("option", { key: item.key, value: item.key }, item.vitola || "Size", item.dims ? ` (${item.dims})` : ""))
+            sizes.map((item) => h("option", { key: item.key, value: item.key, disabled: !isSizeOrderable(item) }, item.vitola || "Size", item.dims ? ` (${item.dims})` : "", ` — ${sizeAvailabilityLabel(item)}`))
           )
         ),
         h("label", null, "Package / Count",

@@ -10,10 +10,8 @@ const root = nodeText(source, nodes, 'HazeGrayReference');
 const text = (name) => nodeText(source, nodes, name);
 const compile = (name, environment) => Function(...Object.keys(environment), `return ${text(name)}`)(...Object.values(environment));
 const client = loadClient();
-const catalogSource = readRepositoryFile('js/domain/catalog-data.mjs');
-const catalogNodes = collectNamedNodes(catalogSource, (name) => ['newSizeRow', 'EMPTY_FORM'].includes(name));
-const newSizeRow = Function(`return ${nodeText(catalogSource, catalogNodes, 'newSizeRow')}`)();
-const EMPTY_FORM = Function('newSizeRow', `return ${nodeText(catalogSource, catalogNodes, 'EMPTY_FORM')}`)(newSizeRow);
+const newSizeRow = client.newSizeRow;
+const EMPTY_FORM = client.EMPTY_FORM;
 const editorMarkup = readRepositoryFile('js/components/catalog-editor.mjs');
 
 test('Catalog Editor add and edit entry points reset from defaults or the selected cigar', () => {
@@ -60,11 +58,12 @@ test('Catalog Editor size handlers preserve immutable add, edit and remove behav
   const addSizeRow = compile('addSizeRow', environment);
   const removeSizeRow = compile('removeSizeRow', environment);
   const original = form.sizes[0];
-  for (const [field, value] of [['vitola', 'Robusto'], ['dims', '50 x 5'], ['msrp', '$12.00'], ['keystoneSingle', '$6.00 box / $5.75 bundle'], ['keystoneBox10', '$60'], ['keystoneBox20', '$115'], ['keystoneBundle20', '$110']]) {
+  for (const [field, value] of [['availability', 'backordered'], ['vitola', 'Robusto'], ['dims', '50 x 5'], ['msrp', '$12.00'], ['keystoneSingle', '$6.00 box / $5.75 bundle'], ['keystoneBox10', '$60'], ['keystoneBox20', '$115'], ['keystoneBundle20', '$110']]) {
     setSizeField(0, field, value);
   }
   assert.notEqual(form.sizes[0], original);
   assert.equal(form.sizes[0].vitola, 'Robusto');
+  assert.equal(form.sizes[0].availability, 'backordered');
   assert.equal(form.sizes[0].keystoneBundle20, '$110');
   addSizeRow();
   assert.equal(form.sizes.length, 2);
@@ -75,6 +74,13 @@ test('Catalog Editor size handlers preserve immutable add, edit and remove behav
 
   const blocked = compile('addSizeRow', { requirePermission: () => false, setForm: () => assert.fail('blocked package edit mutated form'), newSizeRow });
   blocked();
+});
+
+test('Catalog Editor exposes only canonical per-size availability choices through existing package permissions', () => {
+  assert.match(editorMarkup, /"Availability"/);
+  assert.match(editorMarkup, /onSetSizeField\(index, "availability", event\.target\.value\)/);
+  assert.match(editorMarkup, /SIZE_AVAILABILITY_OPTIONS\.map/);
+  assert.match(editorMarkup, /value: size\.availability, disabled: saving/);
 });
 
 test('Catalog Editor save preserves add/edit IDs and the exact catalog record shape', async () => {
@@ -88,7 +94,7 @@ test('Catalog Editor save preserves add/edit IDs and the exact catalog record sh
     tastingNotes: 'cedar, cocoa, ',
     pairings: 'rum, coffee',
     sizes: [{
-      key: 'size-1', vitola: ' Toro ', dims: ' 52 x 6 ', msrp: ' $12.00 ',
+      key: 'size-1', availability: 'backordered', vitola: ' Toro ', dims: ' 52 x 6 ', msrp: ' $12.00 ',
       keystoneSingle: ' $6.00 box / $5.75 bundle ', keystoneBox10: ' $60 ',
       keystoneBox20: '', keystoneBundle20: 'bad'
     }, newSizeRow()]
@@ -121,7 +127,7 @@ test('Catalog Editor save preserves add/edit IDs and the exact catalog record sh
   assert.deepEqual(added.saved.tastingNotes, ['cedar', 'cocoa']);
   assert.deepEqual(added.saved.pairings, ['rum', 'coffee']);
   assert.deepEqual(added.saved.sizes, [{
-    key: 'size-1', vitola: 'Toro', dims: '52 x 6', msrp: '$12.00',
+    key: 'size-1', availability: 'backordered', vitola: 'Toro', dims: '52 x 6', msrp: '$12.00',
     keystoneSingle: '$6.00 box / $5.75 bundle', keystoneBox10: '$60', keystoneBox20: '', keystoneBundle20: 'bad',
     pricing: { msrp: 12, boxSingle: 6, bundleSingle: 5.75, box10: 60, box20: null, bundle20: null }
   }]);

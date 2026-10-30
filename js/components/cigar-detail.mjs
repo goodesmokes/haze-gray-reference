@@ -3,6 +3,7 @@ import { ArrowLeft, Cigarette, Pencil, Trash2 } from "lucide-react";
 import { computePackageMargins } from "../domain/pricing.mjs";
 import { handleCatalogImageError } from "../services/catalog-image-cache.mjs";
 import { Gauge, Tag } from "./common-ui.mjs";
+import { isSizeOrderable, sizeAvailabilityLabel } from "../domain/catalog-availability.mjs";
 
 const h = React.createElement;
 
@@ -54,7 +55,8 @@ export function CigarDetail({ selected, canEditCatalog, user, orderControls, onB
           ? h("div", { style: { color: "#8A93A0", fontSize: 13.5, fontStyle: "italic" } }, "No sizes on file.")
           : h("div", { style: { display: "flex", flexDirection: "column", gap: 14 } }, selected.sizes.map((size) => h("div", { key: size.key, style: { border: "1px solid #2c3036", borderRadius: 6, overflow: "hidden" } },
               h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", background: "rgba(184,137,76,0.07)", borderBottom: "1px solid #2c3036" } },
-                h("div", { style: { fontFamily: "'Oswald', sans-serif", fontSize: 14, letterSpacing: 0.5, color: "#E7C79A" } }, size.vitola || "—", size.dims ? ` · ${size.dims}` : "")
+                h("div", { style: { fontFamily: "'Oswald', sans-serif", fontSize: 14, letterSpacing: 0.5, color: "#E7C79A" } }, size.vitola || "—", size.dims ? ` · ${size.dims}` : ""),
+                h("div", { style: { fontFamily: "'Oswald', sans-serif", fontSize: 11, color: isSizeOrderable(size) ? "#8A93A0" : "#d98a7c", textTransform: "uppercase", letterSpacing: 1 } }, sizeAvailabilityLabel(size))
               ),
               h("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 0 } },
                 h("div", { style: { padding: "12px 14px", borderRight: "1px solid #2c3036" } },

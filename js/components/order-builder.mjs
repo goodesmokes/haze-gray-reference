@@ -2,6 +2,8 @@ import React from "react";
 import { ArrowLeft, ChevronRight, Copy, Mail, Minus, Plus, X } from "lucide-react";
 import { getNumericPrice, getSinglePrice } from "../domain/pricing.mjs";
 import { userButtonStyle, userFieldStyle } from "../ui/styles.mjs";
+import { isSizeOrderable, sizeAvailabilityLabel } from "../domain/catalog-availability.mjs";
+import { findUnavailableOrderItems } from "../domain/saved-orders.mjs";
 
 const h = React.createElement;
 
@@ -54,6 +56,8 @@ export function OrderBuilder({
   const { retailerId, orderRetailer, orderEmail, orderNotes, orderItems } = draft;
   const activeRetailers = directory.records.filter((item) => item.active);
   const linkedRetailerAvailable = directory.records.some((item) => item.id === retailerId && item.active);
+  const unavailableItems = findUnavailableOrderItems(orderItems, cigars, packOptions);
+  const unavailableByLine = new Map(unavailableItems.map((item) => [item.lineKey, item.reason]));
 
   return h("div", { style: { maxWidth: 900, margin: "0 auto", padding: "24px" } },
     h("button", { className: "hg-btn", onClick: onClose, style: { display: "flex", alignItems: "center", gap: 6, background: "none", border: "none", color: "#B8894C", fontFamily: "'Oswald', sans-serif", fontSize: 13, letterSpacing: 1, textTransform: "uppercase", padding: "6px 0", marginBottom: 18 } }, h(ArrowLeft, { size: 16 }), " Back to list"),
@@ -89,11 +93,11 @@ export function OrderBuilder({
         (cigar.sizes || []).length === 0
           ? h("div", { style: { color: "#5c636b", fontSize: 12.5, fontStyle: "italic" } }, "No sizes on file.")
           : h("div", { style: { display: "flex", flexDirection: "column", gap: 8 } }, cigar.sizes.map((size) => h("div", { key: size.key, style: { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" } },
-              h("div", { style: { fontFamily: "'JetBrains Mono', monospace", fontSize: 12.5, color: "#C9CFD6", minWidth: 140 } }, size.vitola, size.dims ? ` (${size.dims})` : ""),
+              h("div", { style: { fontFamily: "'JetBrains Mono', monospace", fontSize: 12.5, color: "#C9CFD6", minWidth: 140 } }, size.vitola, size.dims ? ` (${size.dims})` : "", !isSizeOrderable(size) ? ` — ${sizeAvailabilityLabel(size)}` : ""),
               packOptions.map((pack) => {
                 const price = pack.key === "single" ? getSinglePrice(size, "box") : getNumericPrice(size, pack.key);
                 if (price == null) return null;
-                return h("button", { key: pack.key, type: "button", className: "hg-btn", onClick: () => onAdd(cigar, size, pack.key), style: { background: "none", border: "1px solid #454b53", color: "#C9CFD6", borderRadius: 4, padding: "5px 10px", fontFamily: "'Oswald', sans-serif", fontSize: 11.5 } }, `+ ${pack.label} ($${price.toFixed(2)})`);
+                return h("button", { key: pack.key, type: "button", className: "hg-btn", disabled: !isSizeOrderable(size), onClick: () => onAdd(cigar, size, pack.key), style: { background: "none", border: "1px solid #454b53", color: "#C9CFD6", borderRadius: 4, padding: "5px 10px", fontFamily: "'Oswald', sans-serif", fontSize: 11.5, opacity: isSizeOrderable(size) ? 1 : 0.5 } }, `+ ${pack.label} ($${price.toFixed(2)})`);
               })
             )))
       ))
@@ -103,6 +107,7 @@ export function OrderBuilder({
       ? h("div", { style: { color: "#5c636b", fontSize: 13.5, fontStyle: "italic", marginBottom: 20 } }, "No items added yet — use the buttons above.")
       : h("div", { style: { border: "1px solid #2c3036", borderRadius: 8, overflow: "hidden", marginBottom: 20 } },
           orderItems.map((line) => {
+            const unavailableReason = unavailableByLine.get(line.lineKey);
             const lineWholesale = line.unitPrice * line.qty;
             const lineRetail = typeof line.retailUnitValue === "number" ? line.retailUnitValue * line.qty : 0;
             const lineProfit = lineRetail - lineWholesale;
@@ -112,9 +117,10 @@ export function OrderBuilder({
                 h("div", { style: { flex: 1, minWidth: 180, fontFamily: "'Oswald', sans-serif", fontSize: 13, color: "#EDE6D6" } }, line.cigarName, " — ", line.vitola, line.dims ? ` (${line.dims})` : "", " — ", line.packLabel),
                 h("button", { className: "hg-btn", onClick: () => onSetQuantity(line.lineKey, line.qty - 1), style: { background: "none", border: "1px solid #454b53", color: "#C9CFD6", borderRadius: 4, width: 26, height: 26, display: "flex", alignItems: "center", justifyContent: "center" } }, h(Minus, { size: 12 })),
                 h("div", { style: { fontFamily: "'JetBrains Mono', monospace", fontSize: 13, color: "#EDE6D6", minWidth: 22, textAlign: "center" } }, line.qty),
-                h("button", { className: "hg-btn", onClick: () => onSetQuantity(line.lineKey, line.qty + 1), style: { background: "none", border: "1px solid #454b53", color: "#C9CFD6", borderRadius: 4, width: 26, height: 26, display: "flex", alignItems: "center", justifyContent: "center" } }, h(Plus, { size: 12 })),
+                h("button", { className: "hg-btn", disabled: Boolean(unavailableReason), onClick: () => onSetQuantity(line.lineKey, line.qty + 1), style: { background: "none", border: "1px solid #454b53", color: "#C9CFD6", borderRadius: 4, width: 26, height: 26, display: "flex", alignItems: "center", justifyContent: "center", opacity: unavailableReason ? 0.5 : 1 } }, h(Plus, { size: 12 })),
                 h("button", { className: "hg-btn", onClick: () => onRemove(line.lineKey), style: { background: "none", border: "none", color: "#8A93A0" } }, h(X, { size: 16 }))
               ),
+              unavailableReason && h("div", { role: "alert", style: { color: "#d98a7c", fontFamily: "'Oswald', sans-serif", fontSize: 12, marginTop: 8 } }, unavailableReason, " — remove or correct this item before Final Review."),
               h("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))", gap: 10, marginTop: 10, paddingTop: 9, borderTop: "1px solid rgba(69,75,83,0.45)" } },
                 h(Metric, { label: "Wholesale", value: `$${lineWholesale.toFixed(2)}` }),
                 h(Metric, { label: "Retail Value", value: `$${lineRetail.toFixed(2)}` }),
@@ -134,7 +140,7 @@ export function OrderBuilder({
     orderItems.length > 0 && h("div", { style: { display: "flex", gap: 10, flexWrap: "wrap" } },
       h("button", { className: "hg-btn", onClick: onEmail, style: { display: "flex", alignItems: "center", gap: 8, background: "#B8894C", border: "none", color: "#14161A", borderRadius: 4, padding: "10px 18px", fontFamily: "'Oswald', sans-serif", fontWeight: 600, fontSize: 13 } }, h(Mail, { size: 15 }), " Email Summary"),
       h("button", { className: "hg-btn", onClick: onCopy, style: { display: "flex", alignItems: "center", gap: 8, background: "none", border: "1px solid #6E7681", color: "#C9CFD6", borderRadius: 4, padding: "10px 18px", fontFamily: "'Oswald', sans-serif", fontWeight: 500, fontSize: 13 } }, h(Copy, { size: 15 }), " ", copyConfirmed ? "Copied!" : "Copy Summary"),
-      canUseFinalReview && h("button", { className: "hg-btn", onClick: onFinalReview, style: { display: "flex", alignItems: "center", gap: 8, background: "#B8894C", border: "none", color: "#14161A", borderRadius: 4, padding: "10px 18px", fontFamily: "'Oswald', sans-serif", fontWeight: 600, fontSize: 13 } }, h(ChevronRight, { size: 15 }), " Final Review"),
+      canUseFinalReview && h("button", { className: "hg-btn", disabled: unavailableItems.length > 0, onClick: onFinalReview, style: { display: "flex", alignItems: "center", gap: 8, background: "#B8894C", border: "none", color: "#14161A", borderRadius: 4, padding: "10px 18px", fontFamily: "'Oswald', sans-serif", fontWeight: 600, fontSize: 13, opacity: unavailableItems.length ? 0.5 : 1 } }, h(ChevronRight, { size: 15 }), " Final Review"),
       h("button", { className: "hg-btn", onClick: onClear, style: { display: "flex", alignItems: "center", gap: 8, background: "none", border: "1px solid #6E7681", color: "#C9CFD6", borderRadius: 4, padding: "10px 18px", fontFamily: "'Oswald', sans-serif", fontWeight: 500, fontSize: 13 } }, h(X, { size: 15 }), " Clear Order")
     )
   );

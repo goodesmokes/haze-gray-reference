@@ -1,4 +1,5 @@
 import { isValidCatalogImageUrl } from "./catalog-images.mjs";
+import { getSizeAvailability } from "./catalog-availability.mjs";
 
 export const CATALOG_SNAPSHOT_SCHEMA_VERSION = 1;
 
@@ -15,7 +16,7 @@ const RECORD_FIELDS = [
 ];
 const SIZE_FIELDS = [
   "key", "vitola", "dims", "msrp", "keystoneSingle", "keystoneBox10",
-  "keystoneBox20", "keystoneBundle20", "pricing"
+  "keystoneBox20", "keystoneBundle20", "pricing", "availability"
 ];
 const PRICING_FIELDS = ["msrp", "boxSingle", "bundleSingle", "box10", "box20", "bundle20"];
 const ENVELOPE_FIELDS = ["schemaVersion", "serverConfirmedAt", "records", "confirmedEmpty"];
@@ -75,9 +76,10 @@ function projectPricing(value, label, strict) {
 function projectSize(value, index, strict) {
   const label = `sizes[${index}]`;
   if (!plainObject(value)) throw new Error(`${label} must be an object.`);
-  if (strict) assertExactKeys(value, SIZE_FIELDS, label, SIZE_FIELDS.filter((field) => field !== "pricing"));
+  if (strict) assertExactKeys(value, SIZE_FIELDS, label, SIZE_FIELDS.filter((field) => !["pricing", "availability"].includes(field)));
   const size = {
     key: optionalString(value.key, `${label}.key`, strict),
+    availability: getSizeAvailability(value),
     vitola: optionalString(value.vitola, `${label}.vitola`, strict),
     dims: optionalString(value.dims, `${label}.dims`, strict),
     msrp: optionalString(value.msrp, `${label}.msrp`, strict),

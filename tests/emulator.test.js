@@ -91,7 +91,7 @@ test('Spark browser SDK and Auth/Firestore rules', { skip: !enabled, timeout: 12
       assert.deepEqual((await sdk.getDocFromServer(ref)).data(),before);
       await assert.rejects(owner.client.savePendingOrder({...pending,uid:owner.uid},owner.uid,()=>true,[cigar],owner.client.PACK_OPTIONS),/another account/);
       const own=await sdk.getDocsFromServer(sdk.query(sdk.collection(rep.db,'orders'),sdk.where('creatorUid','==',rep.uid)));assert.equal(own.docs.filter(d=>d.id===pending.id).length,1);
-      await assert.rejects(rep.client.savePendingOrder({...pending,id:reference(rep).id},rep.uid,()=>true,[],rep.client.PACK_OPTIONS),/no longer available/);
+      await assert.rejects(rep.client.savePendingOrder({...pending,id:reference(rep).id},rep.uid,()=>true,[],rep.client.PACK_OPTIONS),/cannot be saved/);
       await assert.rejects(rep.client.savePendingOrder(pending,rep.uid,()=>false,[cigar],rep.client.PACK_OPTIONS),/not authorized/);
     });
     await t.test('intentional security boundary: clients can submit unverified line prices',async()=>{

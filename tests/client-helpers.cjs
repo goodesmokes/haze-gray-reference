@@ -2,6 +2,8 @@ const { extractInlineModule, readRepositoryFile, collectNamedNodes, nodeText } =
 const source = extractInlineModule();
 const pricingSource = readRepositoryFile('js/domain/pricing.mjs');
 const pricingNames = ['parseMoney', 'getNumericPrice', 'getSinglePrice', 'computePackageMargins'];
+const availabilitySource = readRepositoryFile('js/domain/catalog-availability.mjs');
+const availabilityNames = ['SIZE_AVAILABILITY', 'SIZE_AVAILABILITY_OPTIONS', 'AVAILABILITY_LABELS', 'validateSizeAvailability', 'getSizeAvailability', 'isSizeOrderable', 'sizeAvailabilityLabel'];
 const authorizationSource = readRepositoryFile('js/domain/authorization.mjs');
 const authorizationNames = ['ROLE_LABELS', 'NO_PERMISSIONS', 'ROLE_PERMISSIONS', 'isValidRole', 'isActiveProfile', 'getProfilePermissions'];
 const retailerSource = readRepositoryFile('js/domain/retailers.mjs');
@@ -11,16 +13,17 @@ const territoryNames = ['territoryDisplay', 'normalizeTerritory', 'retailerTerri
 const assignmentSource = readRepositoryFile('js/domain/assignments.mjs');
 const assignmentNames = ['retailerAssignments', 'isAssignableRetailerUser', 'validateRepAssignments', 'assignedRepLabel', 'assignmentSummary', 'filterRetailerAssignments'];
 const savedOrderSource = readRepositoryFile('js/domain/saved-orders.mjs');
-const savedOrderNames = ['nonnegativeMoney', 'isReadableSavedOrder', 'buildSavedOrder', 'buildReorderPlan', 'mergeReorderItems'];
+const savedOrderNames = ['nonnegativeMoney', 'currentLineConfiguration', 'findUnavailableOrderItems', 'isReadableSavedOrder', 'buildSavedOrder', 'buildReorderPlan', 'mergeReorderItems'];
 const catalogSource = readRepositoryFile('js/domain/catalog-data.mjs');
 const catalogNames = ['newSizeRow', 'SEED_CIGARS', 'EMPTY_FORM', 'PACK_OPTIONS'];
 const commonUiSource = readRepositoryFile('js/components/common-ui.mjs');
 const commonUiNames = ['getGaugePosition', 'Gauge', 'Tag', 'RetailerLocation'];
 const retailerEditorsSource = readRepositoryFile('js/components/retailer-editors.mjs');
 const retailerEditorNames = ['RetailerPhoneInput'];
-const names = ['ROLE_LABELS', 'NO_PERMISSIONS', 'ROLE_PERMISSIONS', 'isValidRole', 'isActiveProfile', 'getProfilePermissions', 'normalizeRetailerName', 'nonnegativeMoney', 'PACK_OPTIONS', 'SEED_CIGARS', 'parseMoney', 'getNumericPrice', 'getSinglePrice', 'validRetailerId', 'buildSavedOrder', 'isReadableSavedOrder', 'buildReorderPlan', 'mergeReorderItems', 'RETAILER_FIELDS', 'RETAILER_AUTOCOMPLETE', 'territoryDisplay', 'normalizeTerritory', 'retailerTerritoryLabel', 'retailerTerritoryFields', 'retailerTerritoryOptions', 'filterRetailerTerritories', 'territoryMismatches', 'retailerAssignments', 'isAssignableRetailerUser', 'validateRepAssignments', 'assignedRepLabel', 'assignmentSummary', 'filterRetailerAssignments', 'useAssignmentProfiles', 'formatRetailerPhone', 'RetailerPhoneInput', 'validateRetailer', 'findDuplicateRetailer', 'retailerLocation', 'normalizeRetailerSearch', 'RetailerLocation', 'retailerSearch', 'hasMeaningfulDraft', 'retailerOrderFields'];
+const names = ['SIZE_AVAILABILITY', 'SIZE_AVAILABILITY_OPTIONS', 'AVAILABILITY_LABELS', 'validateSizeAvailability', 'getSizeAvailability', 'isSizeOrderable', 'sizeAvailabilityLabel', 'ROLE_LABELS', 'NO_PERMISSIONS', 'ROLE_PERMISSIONS', 'isValidRole', 'isActiveProfile', 'getProfilePermissions', 'normalizeRetailerName', 'nonnegativeMoney', 'currentLineConfiguration', 'findUnavailableOrderItems', 'PACK_OPTIONS', 'SEED_CIGARS', 'newSizeRow', 'EMPTY_FORM', 'parseMoney', 'getNumericPrice', 'getSinglePrice', 'validRetailerId', 'buildSavedOrder', 'isReadableSavedOrder', 'buildReorderPlan', 'mergeReorderItems', 'RETAILER_FIELDS', 'RETAILER_AUTOCOMPLETE', 'territoryDisplay', 'normalizeTerritory', 'retailerTerritoryLabel', 'retailerTerritoryFields', 'retailerTerritoryOptions', 'filterRetailerTerritories', 'territoryMismatches', 'retailerAssignments', 'isAssignableRetailerUser', 'validateRepAssignments', 'assignedRepLabel', 'assignmentSummary', 'filterRetailerAssignments', 'useAssignmentProfiles', 'formatRetailerPhone', 'RetailerPhoneInput', 'validateRetailer', 'findDuplicateRetailer', 'retailerLocation', 'normalizeRetailerSearch', 'RetailerLocation', 'retailerSearch', 'hasMeaningfulDraft', 'retailerOrderFields'];
 const nodes = collectNamedNodes(source, (name) => names.includes(name));
 const pricingNodes = collectNamedNodes(pricingSource, (name) => pricingNames.includes(name));
+const availabilityNodes = collectNamedNodes(availabilitySource, (name) => availabilityNames.includes(name));
 const authorizationNodes = collectNamedNodes(authorizationSource, (name) => authorizationNames.includes(name));
 const retailerNodes = collectNamedNodes(retailerSource, (name) => retailerNames.includes(name));
 const territoryNodes = collectNamedNodes(territorySource, (name) => territoryNames.includes(name));
@@ -31,7 +34,7 @@ const commonUiNodes = collectNamedNodes(commonUiSource, (name) => commonUiNames.
 const retailerEditorNodes = collectNamedNodes(retailerEditorsSource, (name) => retailerEditorNames.includes(name));
 exports.loadClient = (environment = {}) => {
   const code = names.map((name) => {
-    const module = [[pricingNodes, pricingSource], [authorizationNodes, authorizationSource], [retailerNodes, retailerSource], [territoryNodes, territorySource], [assignmentNodes, assignmentSource], [savedOrderNodes, savedOrderSource], [catalogNodes, catalogSource], [commonUiNodes, commonUiSource], [retailerEditorNodes, retailerEditorsSource]].find(([sourceNodes]) => sourceNodes.has(name));
+    const module = [[availabilityNodes, availabilitySource], [pricingNodes, pricingSource], [authorizationNodes, authorizationSource], [retailerNodes, retailerSource], [territoryNodes, territorySource], [assignmentNodes, assignmentSource], [savedOrderNodes, savedOrderSource], [catalogNodes, catalogSource], [commonUiNodes, commonUiSource], [retailerEditorNodes, retailerEditorsSource]].find(([sourceNodes]) => sourceNodes.has(name));
     const [sourceNodes, declarationSource] = module || [nodes, source];
     const node = sourceNodes.get(name); if (!node) throw new Error('Missing client helper: ' + name);
     const body = nodeText(declarationSource, sourceNodes, name);

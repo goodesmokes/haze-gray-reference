@@ -65,6 +65,20 @@ test('catalog service saves and deletes exact cigar document paths without trans
   assert.equal(state.deletes[0].path, 'cigars/cigar-id');
 });
 
+test('catalog service accepts legacy/canonical availability and rejects malformed explicit status before writing', async () => {
+  const { createCatalogService } = await importNativeModule('js/services/catalog-service.mjs');
+  const { api, state } = createFakeApi();
+  const service = createCatalogService({}, api);
+  for (const size of [{ key: 'legacy' }, { key: 'current', availability: 'available' }, { key: 'backorder', availability: 'backordered' }, { key: 'stock', availability: 'out_of_stock' }]) {
+    await service.saveCatalogRecord({ id: size.key, imageUrl: '', sizes: [size] });
+  }
+  assert.equal(state.sets.length, 4);
+  for (const availability of [undefined, null, 'invalid']) {
+    await assert.rejects(service.saveCatalogRecord({ id: 'bad', imageUrl: '', sizes: [{ key: 'bad', availability }] }), /availability/);
+  }
+  assert.equal(state.sets.length, 4, 'invalid records never reach Firestore');
+});
+
 test('migration availability requires an empty catalog and a populated legacy payload', async () => {
   const { createCatalogService } = await importNativeModule('js/services/catalog-service.mjs');
   for (const [empty, exists, payload, expected] of [

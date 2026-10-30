@@ -48,7 +48,7 @@ test('SaveOrderPanel preserves busy, mounted, messaging and finish callback guar
   assert.match(savePanel, /if \(mounted\.current && permitted\(\)\) \{ setSaved\(true\); setMessage\("This order has been recorded in Order History\. Your active draft has not been cleared\."\); \}/);
   assert.match(savePanel, /if \(mounted\.current && permitted\(\)\) \{[\s\S]*?Save could not be confirmed:[\s\S]*?Retry checks the same order ID\. Your draft is unchanged\./);
   assert.match(savePanel, /finally \{ busy\.current = false; if \(mounted\.current\) setSaving\(false\); \}/);
-  assert.match(savePanel, /disabled: saving \|\| \(!attempt && !draft\.orderItems\.length\)/);
+  assert.match(savePanel, /disabled: saving \|\| \(!attempt && \(!draft\.orderItems\.length \|\| unavailableItems\.length > 0\)\)/);
   assert.match(savePanel, /if \(startNew\) onStartNew\(\); else onContinue\(\)/);
   assert.match(savePanel, /Continue Editing Current Order/);
   assert.match(savePanel, /Start New Order \(clear current draft\)/);
@@ -70,12 +70,14 @@ test('Final Review preserves retailer, notes, line pricing and order-total rende
 test('Final Review preserves permission and empty-order gates plus Save/Continue/Start New wiring', () => {
   assert.match(root, /showFinalReview && canUseFinalReview/);
   assert.match(root, /const openFinalReview = \(\) => \{[\s\S]*?if \(!requirePermission\("canUseFinalReview"\)\) return;[\s\S]*?setShowFinalReview\(true\)/);
-  assert.match(orderBuilder, /orderItems\.length > 0 && h\("div"[\s\S]*?canUseFinalReview && h\("button", \{ className: "hg-btn", onClick: onFinalReview/);
+  assert.match(root, /findUnavailableOrderItems\(orderItems, cigars, PACK_OPTIONS\)/);
+  assert.match(root, /Remove or correct unavailable items/);
+  assert.match(orderBuilder, /orderItems\.length > 0 && h\("div"[\s\S]*?canUseFinalReview && h\("button", \{ className: "hg-btn", disabled: unavailableItems\.length > 0, onClick: onFinalReview/);
   assert.match(root, /<OrderBuilder[\s\S]*?canUseFinalReview=\{canUseFinalReview\}[\s\S]*?onFinalReview=\{openFinalReview\}/);
   assert.match(root, /<FinalReview draft=\{activeDraft\}[\s\S]*?onContinue=\{openOrderBuilder\}[\s\S]*?onStartNew=\{\(\) => \{ clearOrder\(\); openOrderBuilder\(\); \}\}/);
   assert.match(finalReview, /h\(SaveOrderPanel, \{ key: `\$\{user\.uid\}:\$\{userProfile\.role\}`[\s\S]*?onContinue, onStartNew \}\)/);
   assert.match(savePanel, /buildSavedOrder\(draft, user, profile\)/);
-  assert.match(savePanel, /disabled: saving \|\| \(!attempt && !draft\.orderItems\.length\)/);
+  assert.match(savePanel, /unavailableItems\.map[\s\S]*?Return to the builder to remove or correct unavailable items/);
 });
 
 test('Final Review preserves email/copy actions and their current failure contracts', () => {

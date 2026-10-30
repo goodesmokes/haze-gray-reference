@@ -1,6 +1,6 @@
 const APP_SCOPE = "/haze-gray-reference/";
 const CACHE_PREFIX = "haze-gray-reference-pwa-";
-const CACHE_NAME = `${CACHE_PREFIX}shell-v6`;
+const CACHE_NAME = `${CACHE_PREFIX}shell-v7`;
 const IMAGE_CACHE_PREFIX = "haze-gray-reference-catalog-images-";
 const IMAGE_CACHE_NAME = `${IMAGE_CACHE_PREFIX}v1`;
 const CATALOG_IMAGE_MESSAGE = "haze-gray-reference:catalog-images";
@@ -31,6 +31,7 @@ const SHELL_PATHS = [
   `${APP_SCOPE}js/components/save-order-panel.mjs`,
   `${APP_SCOPE}js/domain/assignments.mjs`,
   `${APP_SCOPE}js/domain/authorization.mjs`,
+  `${APP_SCOPE}js/domain/catalog-availability.mjs`,
   `${APP_SCOPE}js/domain/catalog-data.mjs`,
   `${APP_SCOPE}js/domain/catalog-images.mjs`,
   `${APP_SCOPE}js/domain/catalog-snapshot.mjs`,

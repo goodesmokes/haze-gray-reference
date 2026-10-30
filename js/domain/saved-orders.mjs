@@ -1,7 +1,28 @@
 import { getNumericPrice, getSinglePrice } from "./pricing.mjs";
 import { normalizeRetailerName, validRetailerId } from "./retailers.mjs";
+import { isSizeOrderable, sizeAvailabilityLabel } from "./catalog-availability.mjs";
 
 export const nonnegativeMoney = (value) => Number.isFinite(value) && value >= 0 && value <= 1000000000;
+
+function currentLineConfiguration(historical, cigars, packOptions) {
+  const cigar = cigars.find((item) => item.id === historical.cigarId);
+  const prefix = `${historical.cigarId}__`, suffix = `__${historical.packKey}`;
+  const sizeKey = historical.sizeKey || (typeof historical.lineKey === "string" && historical.lineKey.startsWith(prefix) && historical.lineKey.endsWith(suffix)
+    ? historical.lineKey.slice(prefix.length, -suffix.length) : "");
+  const size = cigar?.sizes?.find((item) => item.key === sizeKey);
+  const pack = packOptions.find((item) => item.key === historical.packKey);
+  const price = size && pack ? (pack.key === "single" ? getSinglePrice(size, "box") : getNumericPrice(size, pack.key)) : null;
+  const reason = !cigar ? "Product unavailable" : !size ? "Size unavailable" : !isSizeOrderable(size) ? `Size ${sizeAvailabilityLabel(size)}` : !pack ? "Package unavailable" :
+    !nonnegativeMoney(price) || !Number.isSafeInteger(historical.qty) || historical.qty < 1 ? "Current price or quantity unavailable" : "";
+  return { cigar, size, sizeKey, pack, price, reason };
+}
+
+export function findUnavailableOrderItems(orderItems, cigars, packOptions) {
+  if (!Array.isArray(orderItems)) throw new Error("Order items must be an array.");
+  return orderItems.map((line) => ({ line, current: currentLineConfiguration(line, cigars, packOptions) }))
+    .filter(({ current }) => current.reason)
+    .map(({ line, current }) => ({ ...line, reason: current.reason }));
+}
 
 export function isReadableSavedOrder(order) {
   // Rules deliberately do not validate every line. Do not render arbitrary objects as React children.
@@ -53,12 +74,9 @@ export function buildSavedOrder(draft, user, profile) {
 export function buildReorderPlan(order, cigars, packOptions, activeItems) {
   const available = [], unavailable = [];
   for (const historical of order.lineItems || []) {
-    const cigar = cigars.find((item) => item.id === historical.cigarId);
-    const size = cigar?.sizes?.find((item) => item.key === historical.sizeKey);
-    const pack = packOptions.find((item) => item.key === historical.packKey);
-    const price = size && pack ? (pack.key === "single" ? getSinglePrice(size, "box") : getNumericPrice(size, pack.key)) : null;
-    if (!cigar || !size || !pack || !nonnegativeMoney(price) || !Number.isSafeInteger(historical.qty) || historical.qty < 1) {
-      unavailable.push({ ...historical, reason: !cigar ? "Product unavailable" : !size ? "Size unavailable" : !pack ? "Package unavailable" : "Current price or quantity unavailable" });
+    const { cigar, size, pack, price, reason } = currentLineConfiguration(historical, cigars, packOptions);
+    if (reason) {
+      unavailable.push({ ...historical, reason });
       continue;
     }
     const msrp = getNumericPrice(size, "msrp");

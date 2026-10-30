@@ -22,8 +22,22 @@ test('public catalog projection retains canonical current and legacy pricing fie
   assert.equal(projected[0].role, undefined);
   assert.equal(projected[0].retailer, undefined);
   assert.equal(projected[0].sizes[0].privateMargin, undefined);
+  assert.equal(projected[0].sizes[0].availability, 'available');
   assert.equal(projected[0].sizes[0].pricing.secret, undefined);
   assert.deepEqual(projected[0].sizes[0].pricing, record().sizes[0].pricing);
+});
+
+test('availability survives snapshots while legacy snapshots normalize and invalid values reject', async () => {
+  const { createCatalogSnapshot, validateCatalogSnapshot } = await importNativeModule('js/domain/catalog-snapshot.mjs');
+  const metadata = { fromCache: false, hasPendingWrites: false };
+  const current = createCatalogSnapshot({ complete: true, metadata, records: [{ ...record(), sizes: [{ ...record().sizes[0], availability: 'backordered' }] }] });
+  assert.equal(current.records[0].sizes[0].availability, 'backordered');
+  const legacy = structuredClone(current);
+  delete legacy.records[0].sizes[0].availability;
+  assert.equal(validateCatalogSnapshot(legacy).records[0].sizes[0].availability, 'available');
+  for (const invalid of ['invalid', null, 'Out of Stock']) {
+    assert.throws(() => createCatalogSnapshot({ complete: true, metadata, records: [{ ...record(), sizes: [{ ...record().sizes[0], availability: invalid }] }] }), /availability/);
+  }
 });
 
 test('Firestore document identity, image paths, uniqueness and complete validation are enforced', async () => {

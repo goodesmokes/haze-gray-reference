@@ -48,6 +48,7 @@ export function SaveOrderPanel({ draft, user, profile, cigars, packOptions, requ
   let priceCheck = null;
   try { priceCheck = buildReorderPlan(attempt?.payload || buildSavedOrder(draft, user, profile), cigars, packOptions, []); } catch { /* Save reports invalid draft details. */ }
   const priceChanges = priceCheck?.available.filter((item) => item.historicalPrice !== item.line.unitPrice) || [];
+  const unavailableItems = priceCheck?.unavailable || [];
   const finish = (startNew) => {
     if (!permitted()) return;
     try { localStorage.removeItem(storageKey); } catch (error) { setMessage("Could not clear the save receipt. Retry before starting another save."); return; }
@@ -59,10 +60,11 @@ export function SaveOrderPanel({ draft, user, profile, cigars, packOptions, requ
     h("div", { style: { fontFamily: "'Oswald', sans-serif", color: "#8A93A0", fontSize: 13, marginBottom: 10 } }, "Save an internal reference record using the captured draft prices. Prices and totals are not independently server-verified. This does not send email, submit, fulfill, or collect payment."),
     !saved && h("p", { style: { color: "#B8894C", fontSize: 13 } }, "Before saving, review draft prices against the current catalog. Saving preserves the captured prices; a reorder uses current prices. Unavailable configurations cannot be saved as a new record."),
     attempt && !saved && h("p", { style: { color: "#B8894C", fontSize: 13 } }, "Pending save ", attempt.id, ": ", attempt.payload.retailerName || "Retailer not recorded", " · ", orderMoney(attempt.payload.totals?.wholesaleTotal), ". Retry uses that captured order, even if you have since edited the draft."),
-    !saved && h("button", { className: "hg-btn", onClick: () => save(), disabled: saving || (!attempt && !draft.orderItems.length), style: userButtonStyle }, saving ? "Saving…" : attempt ? "Check / Retry Saved Order" : "Save to Order History"),
+    !saved && unavailableItems.length > 0 && h("p", { role: "alert", style: { color: "#d98a7c", fontSize: 13 } }, unavailableItems.map((item) => `${item.cigarName} / ${item.vitola}: ${item.reason}`).join("; "), ". Return to the builder to remove or correct unavailable items."),
+    !saved && h("button", { className: "hg-btn", onClick: () => save(), disabled: saving || (!attempt && (!draft.orderItems.length || unavailableItems.length > 0)), style: userButtonStyle }, saving ? "Saving…" : attempt ? "Check / Retry Saved Order" : "Save to Order History"),
     !saved && priceChanges.length > 0 && h("p", { style: { color: "#B8894C", fontSize: 13 } }, "Current catalog differs: ", priceChanges.map((item) => item.line.cigarName + " / " + item.line.vitola + " / " + item.line.packLabel + ": captured " + orderMoney(item.historicalPrice) + ", current " + orderMoney(item.line.unitPrice)).join("; "), ". Save records the captured prices shown above."),
     attempt && !saved && h("div", { style: { marginTop: 10 } },
-      h("button", { className: "hg-btn", style: userButtonStyle, disabled: saving || !draft.orderItems.length, onClick: () => save(true) }, "Retry This ID With Current Draft"),
+      h("button", { className: "hg-btn", style: userButtonStyle, disabled: saving || !draft.orderItems.length || unavailableItems.length > 0, onClick: () => save(true) }, "Retry This ID With Current Draft"),
       h("p", { style: { color: "#8A93A0", fontSize: 12 } }, "Use this only to replace a rejected captured attempt. Any record already saved under this ID remains unchanged.")
     ),
     message && h("p", { role: "status", style: { color: saved ? "#B8894C" : "#d98a7c", fontSize: 13 } }, message),

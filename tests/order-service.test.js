@@ -177,8 +177,12 @@ test('service accepts current and legacy prices and rejects unavailable configur
     await createOrderService({ db: {}, auth, api: fixture.api }).savePendingOrder(pending, 'rep', () => true, catalog, packs);
     assert.equal(options.write.value.lineItems[0].unitPrice, 60);
   }
-  await assert.rejects(createOrderService({ db: {}, auth, api: fakeApi({}).api }).savePendingOrder(pending, 'rep', () => true, [], packs), /no longer available/);
-  await assert.rejects(createOrderService({ db: {}, auth, api: fakeApi({}).api }).savePendingOrder(pending, 'rep', () => true, currentCatalog, []), /no longer available/);
+  await assert.rejects(createOrderService({ db: {}, auth, api: fakeApi({}).api }).savePendingOrder(pending, 'rep', () => true, [], packs), /cannot be saved/);
+  await assert.rejects(createOrderService({ db: {}, auth, api: fakeApi({}).api }).savePendingOrder(pending, 'rep', () => true, currentCatalog, []), /cannot be saved/);
+  for (const availability of ['backordered', 'out_of_stock']) {
+    const catalog = [{ ...currentCatalog[0], sizes: [{ ...currentCatalog[0].sizes[0], availability }] }];
+    await assert.rejects(createOrderService({ db: {}, auth, api: fakeApi({}).api }).savePendingOrder(pending, 'rep', () => true, catalog, packs), /Remove or correct unavailable items/);
+  }
 });
 
 test('extracted UI imports order service without duplicate service declarations', () => {

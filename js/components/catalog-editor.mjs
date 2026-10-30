@@ -1,6 +1,7 @@
 import React from "react";
 import { Cigarette, Plus, X } from "lucide-react";
 import { isValidCatalogImageUrl, CATALOG_IMAGE_ERROR } from "../domain/catalog-images.mjs";
+import { SIZE_AVAILABILITY_OPTIONS } from "../domain/catalog-availability.mjs";
 
 const h = React.createElement;
 const labelStyle = { fontFamily: "'Oswald', sans-serif", fontSize: 11, letterSpacing: 1.5, color: "#8A93A0", textTransform: "uppercase" };
@@ -64,6 +65,12 @@ export function CatalogEditor({ form, editingId, saving = false, onClose, onForm
             h("input", { placeholder: "Vitola (e.g. Toro)", value: size.vitola, disabled: saving, onChange: (event) => onSetSizeField(index, "vitola", event.target.value), style: { ...sizeInputStyle, flex: 1 } }),
             h("input", { placeholder: "Size (e.g. 52 x 6)", value: size.dims, disabled: saving, onChange: (event) => onSetSizeField(index, "dims", event.target.value), style: { ...sizeInputStyle, flex: 1 } })
           ),
+          h("label", { style: { fontFamily: "'Oswald', sans-serif", fontSize: 10, letterSpacing: 1, color: "#8A93A0", textTransform: "uppercase" } }, "Availability"),
+          h("select", {
+            "aria-label": `${size.vitola || "New size"} availability`, value: size.availability, disabled: saving,
+            onChange: (event) => onSetSizeField(index, "availability", event.target.value),
+            style: { ...sizeInputStyle, width: "100%", marginTop: 3, marginBottom: 8 }
+          }, SIZE_AVAILABILITY_OPTIONS.map((option) => h("option", { key: option.value, value: option.value }, option.label))),
           h("label", { style: { fontFamily: "'Oswald', sans-serif", fontSize: 10, letterSpacing: 1, color: "#8A93A0", textTransform: "uppercase" } }, "MSRP"),
           h("input", { placeholder: "Suggested retail price", value: size.msrp, disabled: saving, onChange: (event) => onSetSizeField(index, "msrp", event.target.value), style: { ...sizeInputStyle, width: "100%", marginTop: 3, marginBottom: 8 } }),
           h("label", { style: { fontFamily: "'Oswald', sans-serif", fontSize: 10, letterSpacing: 1, color: "#8A93A0", textTransform: "uppercase" } }, "Keystone Pricing"),

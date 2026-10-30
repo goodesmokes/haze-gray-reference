@@ -20,7 +20,7 @@ const shellFiles = [
   'js/components/order-builder.mjs', 'js/components/order-history.mjs',
   'js/components/retailer-directory.mjs', 'js/components/retailer-editors.mjs',
   'js/components/save-order-panel.mjs', 'js/domain/assignments.mjs',
-  'js/domain/authorization.mjs', 'js/domain/catalog-data.mjs',
+  'js/domain/authorization.mjs', 'js/domain/catalog-availability.mjs', 'js/domain/catalog-data.mjs',
   'js/domain/catalog-images.mjs', 'js/domain/catalog-snapshot.mjs', 'js/domain/pricing.mjs',
   'js/domain/retailers.mjs', 'js/domain/saved-orders.mjs',
   'js/domain/territories.mjs', 'js/services/auth-service.mjs',
@@ -37,7 +37,7 @@ const shellFiles = [
   'vendor/firebase/10.12.2/firebase-firestore.js'
 ];
 const shell = shellFiles.map(name => scope + name);
-const cacheName = 'haze-gray-reference-pwa-shell-v6';
+const cacheName = 'haze-gray-reference-pwa-shell-v7';
 const imageCacheName = 'haze-gray-reference-catalog-images-v1';
 
 function worker({ network = async () => new Response('network'), entries = new Map(), imageEntries = new Map(), names = [], installFailure = false, imageOpenFailure = false } = {}) {
@@ -134,7 +134,7 @@ test('registration is scoped, nonblocking, feature-detected and never reloads a 
   assert.equal(failed.warnings.length, 1);
 });
 
-test('install atomically caches the complete 48-resource local executable shell', async () => {
+test('install atomically caches the complete 49-resource local executable shell', async () => {
   const app = worker();
   await app.lifecycle('install');
   assert.deepEqual(app.opened, [cacheName]);

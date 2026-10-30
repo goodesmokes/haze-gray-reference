@@ -45,6 +45,7 @@ test('Order Builder add-line behavior preserves identity, pricing and duplicate 
   const environment = {
     requirePermission: () => true,
     PACK_OPTIONS: client.PACK_OPTIONS,
+    isSizeOrderable: client.isSizeOrderable,
     getSinglePrice: client.getSinglePrice,
     getNumericPrice: client.getNumericPrice,
     setOrderItems: (update) => { items = update(items); },
@@ -68,6 +69,19 @@ test('Order Builder add-line behavior preserves identity, pricing and duplicate 
   assert.equal(items[1].lineKey, 'cigar-1__robusto__box20');
   assert.equal(items[1].unitPrice, 125);
   assert.equal(items[1].retailUnitValue, 260);
+  for (const availability of ['backordered', 'out_of_stock']) {
+    const before = structuredClone(items);
+    assert.equal(add(cigar, { ...size, availability }, 'box10', 1), false);
+    assert.deepEqual(items, before, `${availability} cannot add any package`);
+  }
+});
+
+test('Order Builder displays unavailable sizes, disables every package, and identifies stale draft lines', () => {
+  assert.match(builder, /!isSizeOrderable\(size\) \? ` — \$\{sizeAvailabilityLabel\(size\)\}`/);
+  assert.match(builder, /disabled: !isSizeOrderable\(size\)/);
+  assert.match(builder, /const unavailableItems = findUnavailableOrderItems\(orderItems, cigars, packOptions\)/);
+  assert.match(builder, /remove or correct this item before Final Review/);
+  assert.match(builder, /disabled: unavailableItems\.length > 0/);
 });
 
 test('Order Builder quantity, remove and clear handlers preserve exact state behavior', () => {

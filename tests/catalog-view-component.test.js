@@ -152,7 +152,9 @@ test('DetailOrderControls remains cigar-keyed and initializes fresh size, packag
 test('DetailOrderControls preserves package pricing, validation, notice and timeout behavior', () => {
   assert.match(detailControls, /pack\.key === "single" \? getSinglePrice\(size, "box"\) : getNumericPrice\(size, pack\.key\)/);
   assert.match(detailControls, /Number\.isFinite\(pack\.price\) && pack\.price >= 0/);
-  assert.match(detailControls, /disabled: !sizes\.length/);
+  assert.match(detailControls, /disabled: !orderableSizes\.length/);
+  assert.match(detailControls, /disabled: !isSizeOrderable\(item\)/);
+  assert.match(detailControls, /sizeAvailabilityLabel\(item\)/);
   assert.match(detailControls, /"aria-expanded": expanded/);
   assert.match(detailControls, /type: "number", min: "1", step: "1", value: quantity/);
   assert.match(detailControls, /Enter a whole-number quantity of 1 or more\./);
@@ -172,7 +174,7 @@ test('app imports DetailOrderControls without retaining a duplicate implementati
   assert.deepEqual([...detailControlsNodes.keys()], ['DetailOrderControls']);
   assert.match(detailControlsSource, /export function DetailOrderControls/);
   assert.equal((root.match(/<DetailOrderControls\b/g) || []).length, 1);
-  assert.doesNotMatch(root, /No sizes with available order pricing\.|Enter a whole-number quantity of 1 or more\./);
+  assert.doesNotMatch(root, /No available sizes with order pricing\.|Enter a whole-number quantity of 1 or more\./);
 });
 
 test('app imports the extracted cigar detail without retaining a duplicate implementation', () => {

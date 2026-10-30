@@ -25,7 +25,7 @@ export function createOrderService({ db: database, auth: authentication, api = F
       if (payload?.creatorUid !== uid || payload.schemaVersion !== 1 || payload.status !== "saved") throw new Error("Invalid pending order snapshot.");
       const snapshot = buildSavedOrder({ orderItems: payload.lineItems, orderRetailer: payload.retailerName, orderEmail: payload.retailerEmail, orderNotes: payload.notes, retailerId: payload.retailerId }, { uid }, currentProfile);
       const plan = buildReorderPlan(snapshot, cigars, packOptions, []);
-      if (plan.unavailable.length) throw new Error("A captured product, size or package is no longer available. Restore that configuration before retrying this captured save.");
+      if (plan.unavailable.length) throw new Error(`The draft contains an item that cannot be saved: ${plan.unavailable[0].reason}. Remove or correct unavailable items before retrying.`);
       if (!permitted() || authentication.currentUser?.uid !== uid) throw new Error("Your order access changed.");
       transaction.set(ref, { ...snapshot, savedAt: api.serverTimestamp() });
     });

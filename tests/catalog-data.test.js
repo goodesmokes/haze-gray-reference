@@ -53,6 +53,7 @@ test('catalog form and size defaults preserve their structures', async () => {
     assert.match(size.key, /^s-\d+-[a-z0-9]{5}$/);
     assert.deepEqual({ ...size, key: undefined }, {
       key: undefined,
+      availability: 'available',
       vitola: '', dims: '', msrp: '',
       keystoneSingle: '', keystoneBox10: '', keystoneBox20: '', keystoneBundle20: ''
     });

@@ -19,6 +19,7 @@ test('index.html remains the application entry point with its React root and mou
   assert(imports.some((node) => node.source.value === 'react'));
   assert(imports.some((node) => node.source.value === 'react-dom/client'));
   assert(imports.some((node) => node.source.value === './js/domain/pricing.mjs'));
+  assert(imports.some((node) => node.source.value === './js/domain/catalog-availability.mjs'));
   assert(imports.some((node) => node.source.value === './js/domain/authorization.mjs'));
   assert(imports.some((node) => node.source.value === './js/domain/retailers.mjs'));
   assert(imports.some((node) => node.source.value === './js/domain/saved-orders.mjs'));
