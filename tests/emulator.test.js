@@ -59,6 +59,85 @@ test('Spark browser SDK and Auth/Firestore rules', { skip: !enabled, timeout: 12
         await denied(sdk.deleteDoc(sdk.doc(a.db, 'cigars', 'test')));
       }
     });
+    const availabilitySizes = (count) => Array.from({length: count}, (_, index) => ({
+      key: 'size-' + index,
+      vitola: 'Robusto',
+      pricing: {box10: 65, msrp: 13},
+      availability: ['available', 'backordered', 'out_of_stock'][index % 3]
+    }));
+    await t.test('catalog availability: active managers can create and edit up to twenty sizes', async () => {
+      for (const manager of [owner, admin]) {
+        for (const count of [1, 19, 20]) {
+          const ref = sdk.doc(manager.db, 'cigars', `availability-${manager.role}-${count}`);
+          const sizes = availabilitySizes(count);
+          await sdk.setDoc(ref, {name: 'Availability test', sizes});
+          const changed = sizes.map((size, index) => index === count - 1
+            ? {...size, availability: 'out_of_stock'}
+            : size);
+          await sdk.updateDoc(ref, {sizes: changed});
+          assert.deepEqual((await sdk.getDocFromServer(ref)).data().sizes, changed);
+          await sdk.setDoc(ref, {name: 'Catalog edit', sizes: changed});
+        }
+      }
+    });
+    await t.test('catalog availability: invalid arrays and statuses are denied in all write shapes', async () => {
+      const ref = sdk.doc(admin.db, 'cigars', 'availability-admin-20');
+      const createRef = sdk.doc(admin.db, 'cigars', 'availability-invalid-create');
+      const invalidArrays = [availabilitySizes(21), null, {0: availabilitySizes(1)[0]}, [null], ['available']];
+      for (const index of [0, 9, 19]) {
+        const sizes = availabilitySizes(20);
+        sizes[index].availability = 'discontinued';
+        invalidArrays.push(sizes);
+      }
+      for (const availability of [null, true, 0, '', {status: 'available'}, ['available']]) {
+        invalidArrays.push([{key: 'invalid', availability}]);
+      }
+      for (const sizes of invalidArrays) {
+        await denied(sdk.setDoc(createRef, {name: 'Invalid create', sizes}));
+        await denied(sdk.setDoc(ref, {name: 'Invalid replacement', sizes}));
+        await denied(sdk.updateDoc(ref, {sizes}));
+      }
+      await denied(sdk.setDoc(ref, {sizes: availabilitySizes(21)}, {merge: true}));
+      await denied(sdk.updateDoc(ref, {sizes: sdk.arrayUnion({key: 'extra', availability: 'available'})}));
+    });
+    await t.test('catalog availability: legacy omissions and unchanged oversized arrays remain compatible', async () => {
+      const ref = sdk.doc(owner.db, 'cigars', 'availability-legacy');
+      const sizes = [{key: 'legacy'}, ...availabilitySizes(19)];
+      await sdk.setDoc(ref, {name: 'Legacy cigar', sizes});
+      await sdk.updateDoc(ref, {sizes: [{key: 'legacy', availability: 'backordered'}, ...sizes.slice(1)]});
+      const oversizedRef = sdk.doc(owner.db, 'cigars', cigar.id);
+      await sdk.updateDoc(oversizedRef, {name: 'Legacy name edit'});
+      await sdk.setDoc(oversizedRef, cigar);
+      assert.deepEqual((await sdk.getDocFromServer(oversizedRef)).data().sizes, cigar.sizes);
+      const changed = cigar.sizes.map((size, index) => index === 99
+        ? {...size, availability: 'out_of_stock'}
+        : size);
+      await denied(sdk.updateDoc(oversizedRef, {sizes: changed}));
+      await denied(sdk.setDoc(oversizedRef, {...cigar, sizes: changed}));
+
+      const repairRef = sdk.doc(owner.db, 'cigars', 'availability-legacy-repair');
+      await seed('/cigars/availability-legacy-repair', cigar);
+      await sdk.updateDoc(repairRef, {sizes: cigar.sizes.slice(0, 20)});
+    });
+    await t.test('catalog availability: other identities cannot write or escalate their role', async () => {
+      const sizes = availabilitySizes(1);
+      for (const a of actors.filter(a => ![owner, admin].includes(a))) {
+        const ref = sdk.doc(a.db, 'cigars', 'availability-admin-20');
+        assert((await sdk.getDocFromServer(ref)).exists());
+        await denied(sdk.updateDoc(ref, {sizes}));
+        await denied(sdk.setDoc(ref, {name: 'Unauthorized replacement', sizes}));
+        await denied(sdk.setDoc(ref, {sizes}, {merge: true}));
+        await denied(sdk.updateDoc(ref, {sizes: [{key: 'size-0'}]}));
+        await denied(sdk.updateDoc(ref, {sizes: sdk.deleteField()}));
+        await denied(sdk.setDoc(ref, {name: 'Unauthorized removal'}));
+        await denied(sdk.deleteDoc(ref));
+        await denied(sdk.setDoc(sdk.doc(a.db, 'cigars', 'unauthorized-availability'), {sizes}));
+        if (a.role !== 'signedout') {
+          const profileRef = sdk.doc(a.db, 'users', a.uid);
+          await denied(sdk.setDoc(profileRef, {...a.profile, role: 'owner', active: true}));
+        }
+      }
+    });
     const savedRefs = new Map();
     await t.test('Owner/Admin/Field Rep create; all other identities denied', async()=>{
       for (const a of allowed) { const ref=reference(a);await write(a,make(a),ref);savedRefs.set(a.role,ref.id); }

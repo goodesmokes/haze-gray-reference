@@ -50,6 +50,33 @@ function validCatalogImage(data) {
       && data.imageUrl.matches('/haze-gray-reference/assets/cigars/[A-Za-z0-9][A-Za-z0-9_-]*[.]webp'))));
 }
 
+function validSizeAvailabilityAt(sizes, index) {
+  return sizes.size() <= index || (sizes[index] is map
+    && sizes[index].get('availability', 'available') in ['available', 'backordered', 'out_of_stock']);
+}
+
+function validCatalogSizes(sizes) {
+  // Firestore Rules cannot iterate arrays. Check every allowed index explicitly.
+  return sizes is list && sizes.size() <= 20
+    && validSizeAvailabilityAt(sizes, 0) && validSizeAvailabilityAt(sizes, 1)
+    && validSizeAvailabilityAt(sizes, 2) && validSizeAvailabilityAt(sizes, 3)
+    && validSizeAvailabilityAt(sizes, 4) && validSizeAvailabilityAt(sizes, 5)
+    && validSizeAvailabilityAt(sizes, 6) && validSizeAvailabilityAt(sizes, 7)
+    && validSizeAvailabilityAt(sizes, 8) && validSizeAvailabilityAt(sizes, 9)
+    && validSizeAvailabilityAt(sizes, 10) && validSizeAvailabilityAt(sizes, 11)
+    && validSizeAvailabilityAt(sizes, 12) && validSizeAvailabilityAt(sizes, 13)
+    && validSizeAvailabilityAt(sizes, 14) && validSizeAvailabilityAt(sizes, 15)
+    && validSizeAvailabilityAt(sizes, 16) && validSizeAvailabilityAt(sizes, 17)
+    && validSizeAvailabilityAt(sizes, 18) && validSizeAvailabilityAt(sizes, 19);
+}
+
+function validCatalogSizeUpdate() {
+  let sizes = request.resource.data.get('sizes', []);
+  // Preserve edits to other fields on oversized legacy documents.
+  return validCatalogSizes(sizes)
+    || (sizes is list && sizes.size() > 20 && sizes == resource.data.get('sizes', []));
+}
+
 match /cigars/{cigarId} {
 
   // Catalog remains publicly readable.
@@ -57,7 +84,10 @@ match /cigars/{cigarId} {
 
   // Only active Owner/Admin users can change master cigar data,
   // pricing, sizes, or package information.
-  allow create, update: if isManager() && validCatalogImage(request.resource.data);
+  allow create: if isManager() && validCatalogImage(request.resource.data)
+    && validCatalogSizes(request.resource.data.get('sizes', []));
+  allow update: if isManager() && validCatalogImage(request.resource.data)
+    && validCatalogSizeUpdate();
   allow delete: if isManager();
 }
 

@@ -19,16 +19,18 @@ assert.match(source,/import \{ DetailOrderControls \} from "\.\/js\/components\/
 assert.match(source,/<DetailOrderControls key=\{selected\.id\} cigar=\{selected\}/);
 const rules=fs.readFileSync('firestore.rules','utf8').replace(/\r\n/g,'\n');
 const oldRules=cp.execFileSync('git',['show','HEAD:firestore.rules'],{encoding:'utf8'}).replace(/\r\n/g,'\n');
-// Normalize the orders section and Phase 8C image restriction only.
+// Normalize the orders section and the catalog image and size validation additions.
 // Catalog authorization, Authorized Users, legacy access and catch-all remain compared.
-// Emulator tests exercise the new image restriction with real rule evaluation.
+// Emulator tests exercise image and size validation with real rule evaluation.
 const legacyRules = (value) => value
   .replace(/\/\/ Keep this path contract aligned with js\/domain\/catalog-images[.]mjs[.]\nfunction validCatalogImage\(data\) \{[\s\S]*?\n\}\n\n/, '')
+  .replace(/function validSizeAvailabilityAt\(sizes, index\) \{[^}]*\}\n\nfunction validCatalogSizes\(sizes\) \{[^}]*\}\n\nfunction validCatalogSizeUpdate\(\) \{[^}]*\}\n\n/, '')
+  .replace("allow create: if isManager() && validCatalogImage(request.resource.data)\n    && validCatalogSizes(request.resource.data.get('sizes', []));\n  allow update: if isManager() && validCatalogImage(request.resource.data)\n    && validCatalogSizeUpdate();", 'allow create, update: if isManager() && validCatalogImage(request.resource.data);')
   .replace('allow create, update: if isManager() && validCatalogImage(request.resource.data);\n  allow delete: if isManager();', 'allow create, update, delete: if isManager();')
   .replace(/\/\/ -------------------------------\n\/\/ IMMUTABLE SAVED ORDERS[\s\S]*?(?=\/\/ Everything else denied\.)/,'');
 assert.equal(legacyRules(rules),legacyRules(oldRules));
 assert.equal(legacyRules(rules),legacyRules(legacyRules(rules)), 'Normalization must work with or without the orders section');
-assert.notEqual(legacyRules(rules.replace('allow create, update: if isManager() && validCatalogImage(request.resource.data);','allow create, update: if true;')),legacyRules(rules), 'Catalog changes must remain detectable');
+assert.notEqual(legacyRules(rules.replace(/allow (create(?:, update)?): if isManager\(\) && validCatalogImage/, 'allow $1: if true && validCatalogImage')),legacyRules(rules), 'Catalog authorization changes must remain detectable');
 assert.notEqual(legacyRules(rules.replace('request.resource.data.role == resource.data.role','true')),legacyRules(rules), 'Authorized Users protection changes must remain detectable');
 console.log('PASS preservation: config, seed data, gauges, catalog/Authorized Users rules, pricing, original order handlers and exports');
 const ctx={console,TextEncoder};vm.createContext(ctx);
